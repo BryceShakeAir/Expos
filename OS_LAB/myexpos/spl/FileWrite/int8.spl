@@ -1,0 +1,248 @@
+alias userSP R0;
+alias parentProcessTable R1;
+alias parentPID R2;
+alias parentPageTable R10;
+parentProcessTable = PROCESS_TABLE + [SYSTEM_STATUS_TABLE +1]*16;
+userSP = SP;
+parentPID = [SYSTEM_STATUS_TABLE+1];
+parentPageTable = PTBR;
+//Set mode
+
+[parentProcessTable + 9 ] = 8;
+
+//switch stk
+
+[parentProcessTable + 13 ] = SP;
+SP = [parentProcessTable + 11]*512 -1;
+
+//1.Get PCB entry 
+//Returns the PID of allocated processTable
+
+alias childPID R3;
+multipush(R0,R1,R2,R10);
+
+R1 = 1;
+
+call PROCESS_MANAGER;
+
+childPID = R0;
+
+multipop(R0,R1,R2,R10);
+
+if(childPID==-1) then
+
+	//reset mode
+	[parentProcessTable + 9 ] = 0;
+
+	//switch stk
+	SP = [parentProcessTable + 13 ];
+
+	R7 = [ parentPageTable + 2*((userSP - 1)/512)]*512 + (userSP-1)%512;
+	[R7] = -1;
+
+	ireturn;
+
+endif;
+
+
+//2.Set the heap pages of parent if invalid
+if([parentPageTable+5]=="0000"&&[parentPageTable+7]=="0000"  ) then
+
+	alias newPage R4;
+	//Get 2 pages and set the page table entry
+	multipush(R0,R1,R2,R3,R10);
+	
+	R1 = 1;
+
+	call MEMORY_MANAGER;
+	
+	newPage = R0;
+	
+	multipop(R0,R1,R2,R3,R10);
+
+	[parentPageTable+4] = newPage;
+	[parentPageTable+5] = "0110";
+
+	multipush(R0,R1,R2,R3,R10);
+	
+	R1 = 1;
+
+	call MEMORY_MANAGER;
+	
+	newPage = R0;
+	
+	multipop(R0,R1,R2,R3,R10);
+
+	[parentPageTable+6] = newPage;
+	[parentPageTable+7] = "0110";
+
+	
+
+endif;
+
+//3.Allocate 2 stk page and a user area page for child
+
+alias newPage R4;
+alias childPageTable R5;
+childPageTable= PAGE_TABLE_BASE + childPID*20;
+
+//Get 2 pages and set the page table entry
+multipush(R0,R1,R2,R3,R5,R10);
+	
+R1 = 1;
+
+call MEMORY_MANAGER;
+	
+newPage = R0;
+
+multipop(R0,R1,R2,R3,R5,R10);
+
+[childPageTable + 16] = newPage;
+[childPageTable + 17] = "0110";
+
+multipush(R0,R1,R2,R3,R5,R10);
+	
+R1 = 1;
+
+call MEMORY_MANAGER;
+	
+newPage = R0;
+
+multipop(R0,R1,R2,R3,R5,R10);
+
+[childPageTable + 18] = newPage;
+[childPageTable + 19] = "0110";
+
+//Setting UAPN
+multipush(R0,R1,R2,R3,R5,R10);
+	
+R1 = 1;
+
+call MEMORY_MANAGER;
+	
+newPage = R0;
+
+multipop(R0,R1,R2,R3,R5,R10);
+
+
+alias childProcessTable R6;
+childProcessTable  = PROCESS_TABLE + childPID*16;
+//4.Initialize Process Table
+
+[childProcessTable + 9] = 0;
+[childProcessTable + 12] = 0;
+[childProcessTable + 0] = 0;
+[childProcessTable + 2] = parentPID;
+[childProcessTable + 4] = "CREATED";
+[childProcessTable + 11] = newPage;
+
+
+[childProcessTable + 3] = [parentProcessTable + 3];
+[childProcessTable + 6] =  [parentProcessTable + 6];
+[childProcessTable + 10] =  [parentProcessTable + 10];
+[childProcessTable + 7] =  [parentProcessTable + 7];
+[childProcessTable + 13] =  [parentProcessTable + 13];
+
+
+//5.Copy the resource table of parent
+
+alias resEntry R7;
+resEntry = RESOURCE_TABLE_OFFSET;
+alias SEMID R9;
+
+while(resEntry < 512) do
+	
+	R8 = [childProcessTable + 11]*512 + resEntry;
+	[R8] = [ [parentProcessTable + 11]*512 + resEntry ];
+	[R8+1] = [ [parentProcessTable + 11]*512 + resEntry +1];
+	SEMID = [R8+1];
+
+	//Check if the resource is a semaphore
+	if( [R8+0]==SEMAPHORE ) then
+
+		//The semaphore is shared bw parent and child
+		[SEMAPHORE_TABLE + SEMID*4 +1] = [SEMAPHORE_TABLE + SEMID*4 +1] +1; 
+
+	endif;
+	if([R8+0]==FILE) then
+		//Incr ProcessCount in OFT
+		[OPEN_FILE_TABLE + [R8 + 1]*4 + 1] = [OPEN_FILE_TABLE + [R8 + 1]*4 + 1] + 1;
+	
+	endif;
+	resEntry = resEntry +2;
+
+endwhile;
+
+
+//6.Copy DMT of parent
+alias DMTindex R7;
+DMTindex = 0;
+while(DMTindex<10) do
+
+	R8 = [DISK_MAP_TABLE + parentPID*10 + DMTindex];
+	[DISK_MAP_TABLE + childPID*10 + DMTindex] = R8;
+	DMTindex = DMTindex +1;
+
+endwhile;
+
+
+//7.Initialize page table of child
+
+R7 = 0;
+while(R7<16) do 
+
+	R8 = [parentPageTable + R7];
+	[childPageTable + R7] = R8;
+	[MEMORY_FREE_LIST+R8] = [MEMORY_FREE_LIST+R8] +1;
+	[childPageTable + R7 + 1] = [parentPageTable + R7 +1] ;
+	R7 = R7+2;
+endwhile;
+
+//8.Copy userSTK OF parent
+
+R7 = 0;
+alias childStk R8;
+alias parentStk R9;
+childStk = [childPageTable + 16];
+parentStk = [parentPageTable + 16];
+while(R7<512) do
+
+	[childStk*512 + R7] = [parentStk*512 + R7];
+	R7 = R7 + 1;
+
+endwhile;
+
+R7 =0;
+childStk = [childPageTable + 18];
+parentStk = [parentPageTable + 18];
+while(R7<512) do
+
+	[childStk*512 + R7] = [parentStk*512 + R7];
+	R7 = R7 + 1;
+
+endwhile;
+
+//9.Push BP on top of kernel stk of child process
+alias kernelStk R7;
+kernelStk = [childProcessTable + 11]*512;
+[kernelStk] = BP;
+
+
+//10.set ret values in both parent and child
+alias parentRetAddr R7;
+alias childRetAddr R8;
+
+parentRetAddr = [ parentPageTable + 2*((userSP - 1)/512)]*512 + (userSP-1)%512;
+childRetAddr = [ childPageTable + 2*((userSP - 1)/512)]*512 + (userSP-1)%512;
+
+[parentRetAddr] = childPID;
+[childRetAddr] = 0;
+
+
+//reset mode
+[parentProcessTable + 9 ] = 0;
+
+//switch stk
+SP = [parentProcessTable + 13 ];
+
+ireturn;

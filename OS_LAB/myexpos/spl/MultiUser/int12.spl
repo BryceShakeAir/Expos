@@ -1,0 +1,84 @@
+alias userSP R0;
+userSP = SP;
+alias currentPID R1;
+currentPID = [SYSTEM_STATUS_TABLE+1];
+alias currProcessTable R2;
+currProcessTable = PROCESS_TABLE + currentPID*16;
+
+//Switch stk;
+[currProcessTable + 13] = SP;
+SP = [currProcessTable + 11]*512 -1;
+
+//Extracting sys call num
+alias sysNum R3;
+sysNum = [ [ PTBR + 2*( (userSP-5)/512 ) ]*512 + (userSP-5)%512  ]; 
+
+alias returnAddr R4;
+returnAddr = [ PTBR + 2*( (userSP-1)/512 ) ]*512 + (userSP-1)%512;
+
+//Logout sys call
+if(sysNum==28) then
+	
+	//Setting mode
+	[currProcessTable + 9] = 28;
+	
+	//1.Check if currProcess is shell
+	
+	if(currentPID==2) then
+	
+		//2.terminate all process except idle, shell and login
+		
+		multipush(R0,R1,R2,R3,R4);
+		
+		R2 = currentPID;
+		R1 = 5;
+		
+		call PROCESS_MANAGER;
+		
+		multipop(R0,R1,R2,R3,R4);
+		
+		//3.Set state of shell process to terminated
+		
+		[currProcessTable+4]="TERMINATED";
+		
+		//4.Set entry point on top of userStk
+		
+		alias userStkAddr R5;
+		userStkAddr = [PTBR + 16]*512;
+		
+		[userStkAddr] = [ [PTBR+8]*512 + 1 ];
+		
+		[currProcessTable + 13] = 4096;
+		
+		//5.Reset currentUserID in SST to kernel
+		
+		[SYSTEM_STATUS_TABLE + 0] = 0;
+		
+		//6.Wake up login process
+		
+		[PROCESS_TABLE + 16 + 4] = "READY";
+		
+		//7.context_switch
+		
+		multipush(R0,R1,R2,R3,R4,R5);
+		
+		call CONTEXT_SWITCH;
+		
+		multipop(R0,R1,R2,R3,R4,R5);
+	
+		[returnAddr] = 0;
+		
+	else
+		
+		[returnAddr] = -1;
+	
+	endif;
+
+endif;
+
+//Reset mode
+[currProcessTable + 9] = 0;
+
+//Switch stk
+SP = [currProcessTable + 13];
+ireturn;

@@ -1,0 +1,14 @@
+load --os $HOME/Desktop/S5/OS_LAB/myexpos/spl/ProgramLoader/osStartupBoot.xsm
+load --init $HOME/Desktop/S5/OS_LAB/myexpos/expl/ProgramLoader/init.xsm
+load --library $HOME/Desktop/S5/OS_LAB/myexpos/ProgramLoader/library.lib
+load --int=10 $HOME/Desktop/S5/OS_LAB/myexpos/spl/ProgramLoader/int10.xsm
+load --exhandler $HOME/Desktop/S5/OS_LAB/myexpos/spl/ProgramLoader/haltprog.xsm
+load --idle $HOME/Desktop/S5/OS_LAB/myexpos/expl/ProgramLoader/idle.xsm
+load --module 7 $HOME/Desktop/S5/OS_LAB/myexpos/spl/ProgramLoader/boot1.xsm 
+load --int=timer $HOME/Desktop/S5/OS_LAB/myexpos/spl/ProgramLoader/timer.xsm
+load --int=7 $HOME/Desktop/S5/OS_LAB/myexpos/spl/ProgramLoader/int7.xsm
+load --module 5 $HOME/Desktop/S5/OS_LAB/myexpos/spl/ProgramLoader/scheduler.xsm
+load --exec $HOME/Desktop/S5/OS_LAB/myexpos/expl/ProgramLoader/even.xsm
+load --int=9 $HOME/Desktop/S5/OS_LAB/myexpos/spl/ProgramLoader/exec.xsm
+load --module 1 $HOME/Desktop/S5/OS_LAB/myexpos/spl/ProgramLoader/ProcessManager.xsm 
+load --module 2 $HOME/Desktop/S5/OS_LAB/myexpos/spl/ProgramLoader/MemoryManager.xsm 

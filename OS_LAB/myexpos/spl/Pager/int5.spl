@@ -1,0 +1,293 @@
+alias userSP R0;
+userSP = SP;
+alias currentPID R1;
+currentPID = [SYSTEM_STATUS_TABLE+1];
+alias currProcessTable R2;
+currProcessTable = PROCESS_TABLE + currentPID*16;
+
+//Switch stk;
+[currProcessTable + 13] = SP;
+SP = [currProcessTable + 11]*512 -1;
+
+//Extracting sys call num
+alias sysNum R3;
+sysNum = [ [ PTBR + 2*( (userSP-5)/512 ) ]*512 + (userSP-5)%512  ]; 
+
+alias returnAddr R4;
+returnAddr = [ PTBR + 2*( (userSP-1)/512 ) ]*512 + (userSP-1)%512;
+
+//Open sys call
+if(sysNum==2) then
+	
+	[currProcessTable + 9] = 2; 
+	alias fileName R7;
+	fileName =  [ [ PTBR +2*( (userSP-4)/512 )]*512 + (userSP-4)%512  ]; 
+	
+	//1. find a free resource table entry
+	
+	alias resTableBase R5;
+	alias index R6;
+	index = 0;
+	
+	resTableBase =[currProcessTable + 11]*512 + RESOURCE_TABLE_OFFSET;
+	
+	while(index < 8) do
+	
+		if([ resTableBase + 2*index ]==-1) then
+						
+			break;
+		endif;
+		
+		index = index + 1;
+	
+	endwhile;
+	
+	//If there are no free resource table entries
+	if(index==8 ) then
+	
+		[returnAddr] = -3;
+	
+	else
+	
+		//2.Call open function module
+		
+		multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8);
+		
+		R1 = 3;
+		R2 = fileName;
+		
+		call FILE_MANAGER;
+		
+		multipop(R1,R2,R3,R4,R5,R6,R7,R8);
+		
+		if(R0==-1) then
+				//file is not a data file
+				multipop(R0);
+				[returnAddr]=-1;
+				//Reset mode
+				[currProcessTable + 9] = 0;
+
+				//Switch stk
+				SP = [currProcessTable + 13];
+				ireturn;
+		endif;
+		if(R0==-2) then
+					
+				//max files already opened
+				multipop(R0);
+				[returnAddr]=-2;
+				//Reset mode
+				[currProcessTable + 9] = 0;
+
+				//Switch stk
+				SP = [currProcessTable + 13];
+				ireturn;
+						
+		endif;
+		
+		[ resTableBase + 2*index ] = FILE;
+		[ resTableBase + 2*index + 1] = R0;
+		
+		multipop(R0);
+		
+		//3.return file desc
+		
+		[returnAddr] = index;
+		
+	endif;
+
+endif;
+
+//Close sys call
+
+if(sysNum==3) then
+	
+	[currProcessTable + 9] = 3; 
+	alias fileDesc R5;
+	fileDesc = [ [ PTBR +2*( (userSP-4)/512 )]*512 + (userSP-4)%512  ];
+	
+	//1.Check if fileDesc is a valid file
+	if(fileDesc<0 || fileDesc>= 8) then
+		
+		[returnAddr] = -1;
+		//Reset mode
+		[currProcessTable + 9] = 0;
+
+		//Switch stk
+		SP = [currProcessTable + 13];
+		ireturn;
+
+	endif;
+	
+	alias resTableBase R6;
+	resTableBase =[currProcessTable + 11]*512 + RESOURCE_TABLE_OFFSET;
+	
+	if([resTableBase + 2*fileDesc +0]!=FILE) then
+	
+		[returnAddr] = -1;
+	
+	else
+	
+		alias OFTindex R7; 
+		OFTindex = [resTableBase + 2*fileDesc +1];
+	
+		//2.Call close module fn
+		
+		multipush(R0,R1,R2,R3,R4,R5,R6,R7);
+		
+		R1 = 4;
+		R2 = OFTindex;
+		
+		call FILE_MANAGER;
+		
+		multipop(R0,R1,R2,R3,R4,R5,R6,R7);
+		
+		//3.Clear the resource table 
+		[resTableBase + 2*fileDesc +0] = -1;
+		[resTableBase + 2*fileDesc +1] = -1;
+
+	endif;
+	
+endif;
+//Seek sys call
+if(sysNum==6) then
+	
+	//Setting mode flag
+	[currProcessTable + 9] = 6;
+	
+	 
+	//1.Check if fileDesc is a valid file
+	alias fileDesc R5;
+	fileDesc = [ [ PTBR +2*( (userSP-4)/512 )]*512 + (userSP-4)%512  ];
+	if(fileDesc<0 || fileDesc>= 8) then
+		
+		[returnAddr] = -1;
+		//Reset mode
+		[currProcessTable + 9] = 0;
+
+		//Switch stk
+		SP = [currProcessTable + 13];
+		ireturn;
+
+	endif;
+	
+	alias resTableBase R6;
+	resTableBase =[currProcessTable + 11]*512 + RESOURCE_TABLE_OFFSET;
+	
+	//Checking resource identifier field of ResTable
+	
+	if([resTableBase + 2*fileDesc +0]!=FILE) then
+		
+		[returnAddr] = -1;
+		//Reseting Mode
+		[ currProcessTable +  9 ] = 0;
+
+		//Switching STK;
+		SP = [currProcessTable + 13];
+
+		ireturn;
+	
+	endif;
+	
+	alias OFTindex R7;
+	OFTindex = [resTableBase + 2*fileDesc +1];
+	
+	alias inodeIndex R8;
+	inodeIndex = [OPEN_FILE_TABLE + OFTindex*4 + 0];
+	
+	//1.call Acquire Inode
+	multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8);
+	
+	R1 = 4;
+	R2 = inodeIndex;
+	R3 = [SYSTEM_STATUS_TABLE + 1];
+
+	call RESOURCE_MANAGER;
+	
+	if(R0==-1) then
+	
+		multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8);
+		[returnAddr] = -1;
+		//Reseting Mode
+		[ currProcessTable +  9 ] = 0;
+
+		//Switching STK;
+		SP = [currProcessTable + 13];
+
+		ireturn;		
+	
+	endif;
+
+	multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8);
+	
+	//2.Check the given offset
+	alias offset R9;
+	offset = [ [ PTBR + 2*( (userSP-3)/512 ) ]*512 + (userSP-3)%512  ] ; 
+	
+	alias fileSize R10;
+	fileSize = [INODE_TABLE + inodeIndex*16 + 2];
+	alias LseekAddr R11;
+	LseekAddr = OPEN_FILE_TABLE + OFTindex*4 +2;
+	if([LseekAddr] + offset < 0) then
+	
+		//Calling releaseInode
+		
+		backup;
+
+		R1 = 5;
+		R2 = inodeIndex;
+		R3 = [SYSTEM_STATUS_TABLE + 1];
+
+		call RESOURCE_MANAGER;
+		
+		restore;
+		
+		[returnAddr] = -2;
+		//Reseting Mode
+		[ currProcessTable +  9 ] = 0;
+
+		//Switching STK;
+		SP = [currProcessTable + 13];
+		ireturn;		
+	
+	endif;
+		
+	//3.Check if offset is 0
+	if(offset==0) then
+	
+		[LseekAddr] = 0;
+	
+	endif;
+	//4.offset + Lseek > fileSize	
+	if (offset + [LseekAddr] > fileSize  ) then
+		
+		[LseekAddr] = fileSize;
+		
+	else
+		//5.the normal condition
+		[LseekAddr] = [LseekAddr] + offset;
+
+	endif;
+
+	//6.Call releaseInode
+	
+	backup;
+
+	R1 = 5;
+	R2 = inodeIndex;
+	R3 = [SYSTEM_STATUS_TABLE + 1];
+
+	call RESOURCE_MANAGER;
+			
+	restore;	
+	
+	[returnAddr] = 0;
+
+endif;
+
+//Reset mode
+[currProcessTable + 9] = 0;
+
+//Switch stk
+SP = [currProcessTable + 13];
+ireturn;

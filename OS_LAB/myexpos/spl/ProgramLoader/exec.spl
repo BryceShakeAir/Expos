@@ -1,0 +1,218 @@
+//breakpoint;
+alias currentPID R0;
+alias currentProcessTable R1;
+alias userSP R2;
+currentPID = [SYSTEM_STATUS_TABLE + 1 ];
+currentProcessTable = PROCESS_TABLE + currentPID*16;
+userSP = SP;
+
+//Setting the mode in process Table
+[currentProcessTable + 9] = 9;
+
+//Switching stk
+[ currentProcessTable + 13 ] = SP;
+SP = [currentProcessTable + 11]*512-1;
+
+//check if file is present in inode table
+
+alias inodeIndex R4;
+inodeIndex = 0;
+alias fileName R5;
+R6 = (userSP-4)/512;
+R7 = (userSP-4 )%512;
+R8 = [ [ currentProcessTable + 14 ] +R6*2 ]*512 + R7;
+fileName = [R8];
+
+while( inodeIndex < MAX_FILE_NUM ) do
+
+	R8 = [INODE_TABLE + inodeIndex*16 + 1];
+		
+	if(R8==fileName) then
+		
+		//Checking if the file is in XEXE file format i.e checking magic number
+					
+		break;
+	endif;
+	
+	inodeIndex = inodeIndex + 1;
+	
+endwhile;
+
+if(inodeIndex==60  ) then
+		
+		//Switch stk
+		SP = [ currentProcessTable + 13 ];
+
+		//setting mode
+		[currentProcessTable + 9] = 0;
+		
+		//Setting return value;
+		
+		R6 = (userSP-1)/512;
+		R7 = (userSP-1 )%512;
+		alias returnAddr R8;
+		returnAddr = [ [ currentProcessTable + 14 ] +R6*2 ]*512 + R7;
+		[returnAddr] = -1;
+
+		ireturn;
+		
+		
+endif;
+
+
+//Calling Exit Process
+
+multipush(R0,R1,R2,R3,R4,R5);
+
+R1 = 3;
+R2 = currentPID;
+
+call PROCESS_MANAGER;
+
+multipop(R0,R1,R2,R3,R4,R5);
+
+
+//Reclaiming User Area Page by decreasing MFC and increasing MFL
+
+[SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] - 1;
+[MEMORY_FREE_LIST + [currentProcessTable + 13] ] = [MEMORY_FREE_LIST + [currentProcessTable + 13] ] + 1;
+
+//Setting SP to start of kernel stk
+SP = [currentProcessTable + 11]*512-1;
+
+//Update state and inode index in ProcessTable
+
+[ currentProcessTable + 4 ] = "RUNNING";
+[ currentProcessTable + 7 ] = inodeIndex;
+
+//Allocate new pages and set the page table entries for the new process
+
+//Setting up library
+PTBR = PAGE_TABLE_BASE + currentPID*20;
+
+[PTBR+0] = 63;
+[PTBR+1] = "0100";
+
+[PTBR+2] = 64;
+[PTBR+3] = "0100";
+
+//Setting up heap
+
+alias newPage R6;
+
+multipush(R0,R1,R2,R3,R4,R5,PTBR);
+
+R1 = 1;
+//breakpoint;
+call MEMORY_MANAGER;
+
+newPage = R0;
+multipop(R0,R1,R2,R3,R4,R5,PTBR);
+//breakpoint;
+[PTBR+4] = newPage;
+[PTBR+5] = "0110";
+
+multipush(R0,R1,R2,R3,R4,R5,PTBR);
+
+R1 = 1;
+
+call MEMORY_MANAGER;
+
+newPage = R0;
+multipop(R0,R1,R2,R3,R4,R5,PTBR);
+
+[PTBR+6] = newPage;
+[PTBR+7] = "0110";
+
+//Setting up new Stack
+
+multipush(R0,R1,R2,R3,R4,R5,PTBR);
+
+R1 = 1;
+
+call MEMORY_MANAGER;
+
+newPage = R0;
+multipop(R0,R1,R2,R3,R4,R5,PTBR);
+
+[PTBR+16] = newPage;
+[PTBR+17] = "0110";
+
+multipush(R0,R1,R2,R3,R4,R5,PTBR);
+
+R1 = 1;
+
+call MEMORY_MANAGER;
+
+newPage = R0;
+multipop(R0,R1,R2,R3,R4,R5,PTBR);
+
+[PTBR+18] = newPage;
+[PTBR+19] = "0110";
+
+//Setting up the code pages
+
+
+R7 = 0;
+
+while( R7 < 4 ) do
+
+	if( [INODE_TABLE + inodeIndex*16 +R7 +8 ]!=-1) then
+		
+		multipush(R0,R1,R2,R3,R4,R5,R7,PTBR); 
+				
+		R1 = 1;
+
+		call MEMORY_MANAGER;
+
+		newPage = R0;
+		multipop(R0,R1,R2,R3,R4,R5,R7,PTBR);
+
+		[ PTBR + 8 + 2*R7 ] = newPage;
+		[ PTBR + 9 + 2*R7 ] = "0100";
+	
+	else
+		
+		[ PTBR + 8 + 2*R7 ] = -1;
+		[ PTBR + 9 + 2*R7 ] = "0000";
+				
+	endif;
+	
+	R7 = R7 + 1;
+endwhile;
+
+//load the code blocks from disk to mem
+
+R7 = 0;
+
+while( R7 < 4 ) do
+
+	alias diskBlockNum R8;
+	diskBlockNum = [INODE_TABLE + inodeIndex*16 +R7 +8 ];
+	
+	if(diskBlockNum==-1) then
+		break;
+	endif;
+	
+	newPage = [ PTBR + 8 + 2*R7 ];
+	loadi( newPage,diskBlockNum );
+	R7 = R7+1;
+
+endwhile;
+
+//Setting up the new entry point
+
+newPage = [PTBR+8];
+alias stkPage R9;
+stkPage = [PTBR + 16];
+[ stkPage*512 ] =  [ newPage*512 + 1 ];
+
+ 
+//Switch stk The stk should point to the new top of the user stack
+SP = 8*512;
+
+//setting mode
+[currentProcessTable + 9] = 0;
+//breakpoint;
+ireturn;
+

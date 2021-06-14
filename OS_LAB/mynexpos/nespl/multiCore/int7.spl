@@ -1,0 +1,338 @@
+//Setting Mode
+[PROCESS_TABLE +[SYSTEM_STATUS_TABLE + CORE*5 +1]*16 + 9] = 5;
+
+//switching stack
+[PROCESS_TABLE +[SYSTEM_STATUS_TABLE +CORE*5 + 1]*16 + 13] = SP;
+
+SP = [PROCESS_TABLE +[SYSTEM_STATUS_TABLE + CORE*5 +1]*16 + 11]*512 - 1;
+
+//Acquire_kernel_lock
+
+R1 = 1;
+call ACCESS_CONTROL;
+
+
+//Storing userSp 
+
+alias userSP R0;
+alias currPID R11;
+currPID = [SYSTEM_STATUS_TABLE +CORE*5 + 1];
+userSP = [PROCESS_TABLE +currPID*16 + 13];
+alias currProcessTable R7;
+currProcessTable = PROCESS_TABLE + currPID*16;
+
+//Translating userSP -4 i.e. arg 1
+alias fileDescPhysicalAddr R3;
+alias fileDesc R4;
+R1 = (userSP-4)%512;
+R2 = (userSP-4)/512;
+fileDescPhysicalAddr = [PTBR+R2*2]*512 + R1;
+fileDesc = [fileDescPhysicalAddr];
+
+alias returnAddr R5;
+R1 = (userSP-1)%512;
+R2 = (userSP-1)/512;
+returnAddr = [PTBR+R2*2]*512 + R1;
+
+alias word R9;
+R1 = (userSP-3)%512;
+R2 = (userSP-3)/512;
+word = [ [PTBR+R2*2]*512 + R1];
+
+if(fileDesc ==-2) then	
+	
+	//backing up before calling terminal Write;	
+	
+	backup;
+	
+	R1 = 3;
+	R2 = currPID;
+	R3 = word;
+	
+	//breakpoint;
+	call DEVICE_MANAGER;
+	
+	restore;
+
+	[returnAddr] = 0;
+
+else
+	//1.Check if file desc is Valid 
+	//R1 R2 R3 R6 R8
+	if(fileDesc<0||fileDesc>7) then
+		
+		breakpoint;		
+
+		[returnAddr] = -1;
+		//Reseting Mode
+		[ currProcessTable +  9 ] = 0;
+
+		//releasing kernel lock
+		multipush(R7);
+
+		R1 = 4;
+		R2 = KERN_LOCK;
+		call ACCESS_CONTROL;
+
+		multipop(R7);
+
+		//Switching STK;
+		SP = [currProcessTable + 13];
+
+		ireturn;
+	
+	endif;	
+	
+	//Locating perProcess Resource Table
+	alias resTableBase R1;
+	resTableBase =[currProcessTable + 11]*512 + RESOURCE_TABLE_OFFSET;
+	
+	//Checking resource identifier field of ResTable
+	
+	if([resTableBase + 2*fileDesc +0]!=FILE) then
+		
+		[returnAddr] = -1;
+		//Reseting Mode
+		[ currProcessTable +  9 ] = 0;
+
+		//releasing kernel lock
+		multipush(R7);
+
+		R1 = 4;
+		R2 = KERN_LOCK;
+		call ACCESS_CONTROL;
+
+		multipop(R7);
+
+		//Switching STK;
+		SP = [currProcessTable + 13];
+
+		ireturn;
+	
+	endif;
+	
+	
+	alias OFTindex R2;
+	OFTindex = [resTableBase + 2*fileDesc +1];
+	
+	alias inodeIndex R3;
+	inodeIndex = [OPEN_FILE_TABLE + OFTindex*4 + 0];
+	
+	//2.Check if the exclusive permission has been set
+	if([INODE_TABLE+inodeIndex*16 + 4]==EXCLUSIVE&& [INODE_TABLE+inodeIndex*16 + 3]!=INODE_ROOT&&[INODE_TABLE+inodeIndex*16 + 3]!=[currProcessTable + 3]) then
+	
+		[returnAddr] = -3;
+		//Reseting Mode
+		[ currProcessTable +  9 ] = 0;
+		
+		//releasing kernel lock
+		multipush(R7);
+
+		R1 = 4;
+		R2 = KERN_LOCK;
+		call ACCESS_CONTROL;
+
+		multipop(R7);
+
+		//Switching STK;
+		SP = [currProcessTable + 13];
+
+		ireturn;	
+	
+	endif;
+
+	alias LseekAddr R6;
+	alias Lseek R8;
+	LseekAddr = OPEN_FILE_TABLE + OFTindex*4 + 2;
+	Lseek = [LseekAddr];
+	//breakpoint;
+		
+	//3.Lock the file by calling acquireInode
+
+	backup;
+
+	R1 = 4;
+	R2 = inodeIndex;
+	R3 = currPID;
+
+	call RESOURCE_MANAGER;
+	
+	if(R0==-1) then
+	
+		restore;
+		[returnAddr] = -1;
+		//Reseting Mode
+		[ currProcessTable +  9 ] = 0;
+
+		//releasing kernel lock
+		multipush(R7);
+
+		R1 = 4;
+		R2 = KERN_LOCK;
+		call ACCESS_CONTROL;
+
+		multipop(R7);
+
+		//Switching STK;
+		SP = [currProcessTable + 13];
+
+		ireturn;		
+	
+	endif;
+
+	restore;
+
+	//4.Check if Lseek = maxFileSize
+	if(Lseek==MAX_FILE_SIZE) then
+	
+		//Calling releaseInode
+		
+		backup;
+
+		R1 = 5;
+		R2 = inodeIndex;
+		R3 = currPID;
+
+		call RESOURCE_MANAGER;
+		
+		restore;
+		
+		[returnAddr] = -2;
+		//Reseting Mode
+		[ currProcessTable +  9 ] = 0;
+	
+		//releasing kernel lock
+		multipush(R7);
+
+		R1 = 4;
+		R2 = KERN_LOCK;
+		call ACCESS_CONTROL;
+
+		multipop(R7);
+
+		//Switching STK;
+		SP = [currProcessTable + 13];
+
+		ireturn;		
+	
+	endif;
+	
+	
+	//5.Check if Lseek=FileSize && Lseek%512==0 
+	if(Lseek==[INODE_TABLE +inodeIndex*16 +2] && (Lseek%512==0) ) then
+	
+		//6.Then allocate a new disk block
+		
+		alias freeBlockNum R10;
+		multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R11);
+		
+		R1 = 3;
+		
+		call MEMORY_MANAGER;
+		
+		freeBlockNum = R0;
+		
+		multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R11);
+		
+		//If no free block is present call Release inode and return -2
+		
+		if(freeBlockNum==-1) then
+		
+			//Calling releaseInode
+		
+			multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R11);			
+
+			R1 = 5;
+			R2 = inodeIndex;
+			R3 =currPID;
+
+			call RESOURCE_MANAGER;
+			
+			multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R11);
+			
+			[returnAddr] = -2;
+			//Reseting Mode
+			[ currProcessTable +  9 ] = 0;
+			
+			//releasing kernel lock
+			multipush(R7);
+
+			R1 = 4;
+			R2 = KERN_LOCK;
+			call ACCESS_CONTROL;
+
+			multipop(R7);
+
+			//Switching STK;
+			SP = [currProcessTable + 13];
+
+			ireturn;			
+		
+			//else set the new disk block found in the (lseek / 512) disk block field
+			else
+		
+				[INODE_TABLE+inodeIndex*16+8+(Lseek/512)] = freeBlockNum;		
+					
+		endif;
+		
+	
+	endif;
+	
+	//7.Call Buffer write
+	multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R11);
+		
+	alias blockNum R12;
+	R13 = Lseek/512;
+	blockNum = [INODE_TABLE + inodeIndex*16 + 8 + R13];
+		
+	R1 = 1;
+	R2 = blockNum;
+	R3 = Lseek%512;
+	R4 = word;
+		
+	call FILE_MANAGER;
+		
+	multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R11);
+
+	//8.Increment if lseek = fileSize the fileSize by 1
+	if(Lseek==[INODE_TABLE + inodeIndex*16 + 2]) then
+	
+		[INODE_TABLE + inodeIndex*16 + 2] = [INODE_TABLE + inodeIndex*16 + 2] +1;
+	
+	endif;
+	
+	//9.Lseek++
+	
+	[LseekAddr] = [LseekAddr] +1;	
+		
+	//10.ReleaseInode
+	
+	multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R11);			
+
+	R1 = 5;
+	R2 = inodeIndex;
+	R3 = currPID;
+
+	call RESOURCE_MANAGER;
+			
+	multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R11);
+			
+	[returnAddr] = 0;
+endif;
+
+//Setting SP back
+//releasing kernel lock
+multipush(R11);
+
+R1 = 4;
+R2 = KERN_LOCK;
+call ACCESS_CONTROL;
+
+multipop(R11);
+
+SP = [PROCESS_TABLE +currPID*16 + 13];
+
+//Setting back mode
+[PROCESS_TABLE +currPID*16 + 9] = 0;
+
+ireturn;

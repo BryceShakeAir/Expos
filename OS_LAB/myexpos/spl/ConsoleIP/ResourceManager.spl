@@ -1,0 +1,46 @@
+alias functionNum R1;
+alias currentPID R2;
+
+//acquireTerminal
+if(functionNum==8) then
+
+	while( [TERMINAL_STATUS_TABLE + 0]==1 ) do
+		
+		//Changing the state of current process
+		[PROCESS_TABLE + currentPID*16 + 4 ] = "WAIT_TERMINAL";
+		//Pushing used reg
+		multipush(R1,R2);
+		
+		call CONTEXT_SWITCH;	
+		
+		//Poping
+		multipop(R1,R2);
+		
+	endwhile;
+	//Changing status field;
+	[TERMINAL_STATUS_TABLE + 0] = 1;
+	[TERMINAL_STATUS_TABLE + 1] = R2;
+endif;
+
+//releaseTerminal
+if( functionNum == 9 ) then
+
+	if( currentPID!= [TERMINAL_STATUS_TABLE + 1] ) then
+	//Here the PID of Terminal Table is different from current Pid		
+		R0 = -1;
+		return;	
+	endif;
+	[TERMINAL_STATUS_TABLE + 0] = 0;
+	//updating status of all process with WAIT_TERMINAL as status to READY
+	R4 = 0;
+	while(R4<16) do
+
+		if( [PROCESS_TABLE + R4*16 + 4 ]=="WAIT_TERMINAL" ) then
+				[PROCESS_TABLE + R4*16 + 4 ]="READY";
+		endif;
+		R4 = R4 + 1;
+	endwhile;
+	R0 = 0;
+endif;
+
+return;

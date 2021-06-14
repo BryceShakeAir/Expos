@@ -1,0 +1,11 @@
+load --os $HOME/Desktop/S5/OS_LAB/myexpos/spl/RoundRobin/osStartupBoot.xsm
+load --init $HOME/Desktop/S5/OS_LAB/myexpos/expl/RoundRobin/odd.xsm
+load --library $HOME/Desktop/S5/OS_LAB/myexpos/expl/library.lib
+load --int=10 $HOME/Desktop/S5/OS_LAB/myexpos/spl/RoundRobin/int10.xsm
+load --exhandler $HOME/Desktop/S5/OS_LAB/myexpos/spl/RoundRobin/haltprog.xsm
+load --idle $HOME/Desktop/S5/OS_LAB/myexpos/expl/RoundRobin/idle.xsm
+load --module 7 $HOME/Desktop/S5/OS_LAB/myexpos/spl/RoundRobin/boot1.xsm 
+load --int=timer $HOME/Desktop/S5/OS_LAB/myexpos/spl/RoundRobin/timer.xsm
+load --int=7 $HOME/Desktop/S5/OS_LAB/myexpos/spl/RoundRobin/int7.xsm
+load --module 5 $HOME/Desktop/S5/OS_LAB/myexpos/spl/RoundRobin/scheduler.xsm
+load --exec $HOME/Desktop/S5/OS_LAB/myexpos/expl/RoundRobin/even.xsm

@@ -1,0 +1,20 @@
+int main()
+{
+	decl
+		int i,temp;
+		string s1;
+	enddecl
+	begin
+
+		i = 0;
+		s1 = "Even";
+		while(i<100) do
+			if((i%2)==0) then
+				temp = exposcall("Write",-2,i);
+				temp = exposcall("Write",-2,s1); 			
+			endif;
+			i = i + 1;
+		endwhile;
+		return 0;
+	end
+}

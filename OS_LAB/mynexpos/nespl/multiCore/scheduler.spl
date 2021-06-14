@@ -1,0 +1,185 @@
+//1.acquireSchedLock
+
+R1 = 2;
+call ACCESS_CONTROL;
+
+//PID OF current instruction
+alias currPID R0;
+currPID = [SYSTEM_STATUS_TABLE + CORE*5+ 1];
+
+//Pushing BP
+multipush (BP);
+
+//Process Table entry of current process
+alias currProcessTable R1;
+currProcessTable = PROCESS_TABLE + 16*currPID;
+[currProcessTable + 12] = SP%512;
+[currProcessTable + 14] = PTBR;
+[currProcessTable + 15] = PTLR;
+
+breakpoint;
+
+alias newPID R2;
+newPID = 0;
+if(CORE==PRIMARY_CORE) then
+
+	//Paging status is set
+	if( [SYSTEM_STATUS_TABLE + 5]!=0 ) then
+
+		//If swapper daemon is blocked waiting for disk
+		if( [PROCESS_TABLE + 15*16 + 4 ] =="WAIT_DISK" ) then
+			
+			//Schedule idle				
+			newPID = 0;
+			
+		else
+		
+			//The first time paging status has been set
+			newPID = 15;		
+
+		endif;
+		
+	else
+
+		//2.a.If logout status is set and sec core is not running idle2
+		if([SYSTEM_STATUS_TABLE+7]==1&&[SYSTEM_STATUS_TABLE+6]!=14) then
+		
+			newPID = 0;
+		
+		else
+	
+			//Round robin scheduling for remaining non swapped process
+			R3 = currPID;
+			currPID = currPID+1;
+			//2.b. No idle2
+			while( currPID<14 ) do
+				
+				//2.c. No process curentlly Running in 2nd core
+				if(([PROCESS_TABLE + 16*currPID + 4]=="READY"||[PROCESS_TABLE + 16*currPID + 4]=="CREATED")&&[PROCESS_TABLE + 16*currPID + 6]==0 && [SYSTEM_STATUS_TABLE+6]!=currPID ) then
+					
+						newPID = currPID;
+						break;		
+				endif;
+				currPID = currPID+1;
+				
+			endwhile;
+			if(currPID==16) then
+
+				currPID = 1;
+				while( currPID<R3 ) do
+				
+					if(([PROCESS_TABLE + 16*currPID + 4]=="READY"||[PROCESS_TABLE + 16*currPID + 4]=="CREATED")&&[PROCESS_TABLE + 16*currPID + 6]==0  && [SYSTEM_STATUS_TABLE+6]!=currPID ) then
+						
+						newPID = currPID;
+						break;		
+					endif;
+					currPID = currPID+1;
+
+				endwhile;
+				
+			endif;
+			
+		endif;	
+
+	endif;
+
+else
+
+	//3.a.Paging status is set or if logout status is set
+	if( [SYSTEM_STATUS_TABLE+5]!=0 || [SYSTEM_STATUS_TABLE+7]==1) then
+		
+		newPID = 14;
+	
+	else
+
+		//Round robin scheduling for remaining non swapped process
+		newPID = 14;		
+		R3 = currPID;
+		currPID = currPID+1;
+		while( currPID<15 ) do
+			
+			//3.b.No login,shell,swapper,idle
+			//3.c.Not running in core 1
+			if(([PROCESS_TABLE + 16*currPID + 4]=="READY"||[PROCESS_TABLE + 16*currPID + 4]=="CREATED")&&[PROCESS_TABLE + 16*currPID + 6]==0 ) then
+
+				if(currPID!=0&&currPID!=1&&currPID!=2 && [SYSTEM_STATUS_TABLE+1]!=currPID) then
+				
+					newPID = currPID;
+					//3.D Updating SST
+					[SYSTEM_STATUS_TABLE+6] = newPID;
+					
+					break;
+				endif;		
+			endif;
+			currPID = currPID+1;
+			
+		endwhile;
+		if(currPID>14) then
+
+			currPID = 3;
+			while( currPID<R3 ) do
+			
+				if(([PROCESS_TABLE + 16*currPID + 4]=="READY"||[PROCESS_TABLE + 16*currPID + 4]=="CREATED")&&[PROCESS_TABLE + 16*currPID + 6]==0&&[SYSTEM_STATUS_TABLE+1]!=currPID ) then
+					
+					newPID = currPID;
+					//3.D Updating SST
+					[SYSTEM_STATUS_TABLE+6] = newPID;
+					
+					break;		
+				endif;
+				currPID = currPID+1;
+
+			endwhile;
+			
+		endif;
+			
+
+	endif;
+
+endif;
+//Updating SP of new Process
+//Finding new ProcessTable
+
+alias newProcessTable R3;
+newProcessTable = PROCESS_TABLE + 16*newPID;
+
+SP = [newProcessTable + 11]*512 + [newProcessTable + 12];
+//Updating PTBR AND PTLR
+PTBR = [newProcessTable + 14];
+PTLR = [newProcessTable + 15]; 
+
+//Updating System Status Table
+[SYSTEM_STATUS_TABLE + CORE*5+1] = newPID;
+
+//is Process Created
+//print [newProcessTable + 4];
+if([newProcessTable + 4]=="CREATED") then
+
+	//Releasing lock
+	multipush(R1,R2,R3);		
+	R1 = 4;
+	R2 = SCHED_LOCK;
+	call ACCESS_CONTROL;
+	multipop(R1,R2,R3);
+	BP = [ [newProcessTable+11]*512 ];
+   
+	SP = [newProcessTable+13];
+	[newProcessTable + 4]= "RUNNING";
+	[newProcessTable + 9]= 0;
+	//breakpoint;	
+	ireturn;
+		
+endif;
+
+[newProcessTable + 4]= "RUNNING";
+//Restore BP
+multipop (BP);
+
+//4.Releasing the lock
+R1 = 4;
+R2 = SCHED_LOCK;
+call ACCESS_CONTROL;
+
+return;
+
+

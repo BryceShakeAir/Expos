@@ -1,0 +1,300 @@
+alias functionNum R1;
+alias currentPID R2;
+
+if(functionNum==SWAP_OUT) then
+
+	//1.Select the process to be swapped out
+	alias swapPID R3;
+	swapPID = 3;
+	alias reqProcessTable R4;
+	reqProcessTable = PROCESS_TABLE + swapPID*16;
+	//a.Check if there are any process Waiting for other Proceess and not swapped
+	while(swapPID<MAX_PROC_NUM) do
+
+		if([reqProcessTable + 6]==0&& [reqProcessTable + 4]=="WAIT_PROCESS"  ) then
+
+			break;
+
+		endif;
+		swapPID = swapPID+1;
+		reqProcessTable = reqProcessTable + 16;
+
+	endwhile;
+
+	if(swapPID==MAX_PROC_NUM) then
+
+		swapPID = 3;
+		reqProcessTable = PROCESS_TABLE + swapPID*16;
+		//b.Waiting for semaphore
+
+		while(swapPID<MAX_PROC_NUM) do
+
+			if([reqProcessTable + 6]==0&& [reqProcessTable + 4]=="WAIT_SEM"  ) then
+
+				break;
+
+			endif;
+			swapPID = swapPID+1;
+			reqProcessTable = reqProcessTable + 16;
+
+		endwhile;
+
+		if(swapPID==MAX_PROC_NUM) then
+
+			swapPID = -1;
+			//c.Process with highest tick value not terminated,running,swapped,allocated
+
+			alias maxTick R5;
+			maxTick = 0;
+			alias PID R6;
+			PID = 3;
+
+			reqProcessTable = PROCESS_TABLE + 3*16;
+
+			while(PID<MAX_PROC_NUM) do
+
+				alias state R9;
+				state = [reqProcessTable + 4];
+
+				if([ reqProcessTable + 6]==0&&state!="ALLOCATED"&&state!="TERMINATED"&&state!="RUNNING") then
+
+					if(maxTick < [reqProcessTable+0]  ) then
+
+						maxTick = [reqProcessTable+0];
+						swapPID = PID;
+
+					endif;
+
+				endif;
+				PID = PID+1;
+				reqProcessTable = reqProcessTable +16;
+
+			endwhile;
+
+
+			//If no such process is found, return
+			if(swapPID==-1) then
+
+				//Setting paging status to 0
+				[SYSTEM_STATUS_TABLE + 5] = 0;
+				return;
+
+			endif;
+
+		endif;
+
+	endif;
+
+	//2.Reset TICK
+
+	reqProcessTable  = PROCESS_TABLE + swapPID*16;
+	[reqProcessTable + 0] = 0;
+	alias reqPageTable R5;
+	reqPageTable = PAGE_TABLE_BASE + swapPID*20;
+
+	//3.Invalidate page table entries for code pages and release them
+	R6 = 2;
+
+	while(R6<10) do
+
+		alias reqPage R8;
+		reqPage = [reqPageTable +R6*2 + 0];
+
+		alias reqPageTableInd R9;
+		reqPageTableInd = reqPageTable +R6*2;
+		alias swapBlock R7;
+
+		if([reqPageTableInd + 1]!="0000") then
+
+			//4.For each valid,non shared heap page and user stack
+			if(( (R6==2||R6==3)&&[MEMORY_FREE_LIST+reqPage]==1 ) ||R6==8||R6==9) then
+
+				//5.call get Swap block
+
+				multipush(R1,R2,R3,R4,R5,R6,R8,R9);
+
+				R1 = 6;
+
+				call MEMORY_MANAGER;
+
+				swapBlock = R0;
+
+				multipop(R1,R2,R3,R4,R5,R6,R8,R9);
+
+				//6.Update DMT
+
+				[DISK_MAP_TABLE +swapPID*10 + R6 ] = swapBlock;
+				
+				//7.call Disk Store
+
+				multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+
+				R1 = 1;
+				R2 = currentPID;
+				R3 = reqPage;
+				R4 = swapBlock;
+
+				call DEVICE_MANAGER;
+
+				multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+
+			endif;
+			//8.Invalidate entry in page table and release the page
+
+			multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+
+			R1 = 2;
+			R2 = reqPage;
+
+			call MEMORY_MANAGER;
+
+			multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+
+			[reqPageTableInd + 0] = -1;
+			[reqPageTableInd + 1] = "0000";
+
+		endif;
+
+		R6 = R6+1;
+
+	endwhile;
+
+	//10.Set Swap Flag in Process Table
+
+	[reqProcessTable + 6 ] = 1;
+
+	//11.increment Swap Count and reset paging status
+
+	[SYSTEM_STATUS_TABLE + 4] = [SYSTEM_STATUS_TABLE + 4 ] +1;
+	[SYSTEM_STATUS_TABLE + 5] = 0;
+
+endif;
+
+if(functionNum==SWAP_IN) then
+
+	
+	//1.Check if there are any process which is swapped and is READY and has max tick value
+	alias swapPID R10;
+	alias PID R3;
+	PID = 3;
+	swapPID = -1;
+	//R4 has max tick value
+	R4 = 0;
+	R5 = PROCESS_TABLE + PID*16;
+	while(PID<MAX_PROC_NUM) do
+
+		if( [R5 +6]==1&&[R5 +4]=="READY"&&[R5 +0]>R4 ) then
+
+			R4 = [R5 +0];
+			swapPID = PID;
+
+		endif;
+		R5 = R5+16;
+		PID = PID+1;
+	endwhile;
+
+	//if there are no such processes
+	if(swapPID==-1) then
+
+		//Setting paging status to 0
+		[SYSTEM_STATUS_TABLE + 5] = 0;
+	
+		return;
+
+	endif;
+
+	alias reqProcessTable R4;
+	alias reqPageTable R5;
+	reqProcessTable = PROCESS_TABLE + swapPID*16;
+	reqPageTable = PAGE_TABLE_BASE + swapPID*20;
+
+	//2.Set TICK to 0
+
+	[reqProcessTable + 0] = 0;
+
+	//3.For each and every swapped heap and user stk
+
+	alias index R6;
+	index = 2;
+
+	alias DMTindex R9;
+	DMTindex = DISK_MAP_TABLE + 10*swapPID;
+
+	while(index < 10 ) do
+
+		if( (index==2|| index==3 || index==8||index==9 ) &&[DMTindex+ index ]!=-1 ) then
+
+			//4.call Get free page
+
+			alias newPage R7;
+
+			multipush(R1,R2,R3,R4,R5,R6,R9,R10);
+
+			R1 = 1;
+
+			call MEMORY_MANAGER;
+
+			newPage = R0;
+
+			multipop(R1,R2,R3,R4,R5,R6,R9,R10);
+			
+			
+			//5.Get disk block from DMT
+
+			alias diskBlockNum R8;
+
+			diskBlockNum = [DMTindex + index ];
+
+			//6.Call Disk load to load heap/stack page
+
+			multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+
+			R2 = currentPID;
+			R1 = 2;
+			R3 = newPage;
+			R4 = diskBlockNum;
+
+			call DEVICE_MANAGER;
+
+			multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+
+			//7.Validate page table
+
+			[reqPageTable + 2*index + 0] = newPage;
+			[reqPageTable + 2*index + 1] = "0110";
+
+			//8.call Release block
+
+			multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+
+			R1 = 4;
+			R3 = currentPID;
+			R2 = diskBlockNum;
+
+			call MEMORY_MANAGER;
+
+			multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+
+			//9.Invalidate DMT
+
+			[DMTindex + index ] = -1;
+
+		endif;
+
+		index = index + 1;
+
+	endwhile;
+
+	//10.Set swap flag to 0
+
+	[reqProcessTable + 6] = 0;
+
+	//11.decrement swap count and paging status
+	[SYSTEM_STATUS_TABLE + 4] = [SYSTEM_STATUS_TABLE + 4 ] - 1;
+	[SYSTEM_STATUS_TABLE + 5] = 0;
+	
+
+endif;
+
+
+return;

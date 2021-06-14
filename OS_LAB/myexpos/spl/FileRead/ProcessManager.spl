@@ -1,0 +1,249 @@
+
+alias functionNum R1;
+alias reqPID R2;
+
+//GET_PCB_ENTRY
+if(functionNum==1) then
+
+	alias newPID R0;
+	newPID  = -1;
+	R3 = 0;
+	while(R3<16) do
+
+		if([PROCESS_TABLE + R3*16 + 4]=="TERMINATED") then
+
+			newPID = R3;
+			[PROCESS_TABLE + R3*16 + 4] = "ALLOCATED";
+			[PROCESS_TABLE + R3*16 + 14] = PAGE_TABLE_BASE + newPID*20;
+			[PROCESS_TABLE + R3*16 + 15] = 10;
+			[PROCESS_TABLE + R3*16 + 1] = newPID;
+
+			break;
+		endif;
+		R3 = R3 +1;
+	endwhile;
+	
+
+endif;
+//Free User area Page
+if(functionNum==2) then
+	
+	//Releasing all entries in the resourceTable
+	R4 = 0;
+	R5 = [PROCESS_TABLE + reqPID*16 + 11];
+	while(R4<8) do
+		
+		//If the semaphore entry is valid then calling release semaphore
+		if( [R5+RESOURCE_TABLE_OFFSET+2*R4+0]==SEMAPHORE ) then
+
+			alias SEMID R6;
+			SEMID = [R5+RESOURCE_TABLE_OFFSET+2*R4+1];
+			
+			multipush(R1,R2,R3,R4,R5,R6);
+			
+			R3 = reqPID;
+			R1 = 7;
+			R2 = SEMID;
+			
+			call RESOURCE_MANAGER;
+			
+			multipop(R1,R2,R3,R4,R5,R6);		
+
+		endif;
+		//If the file entry is valid , we call close file
+		if( [R5+RESOURCE_TABLE_OFFSET+2*R4+0]==FILE ) then
+			
+			alias OFTindex R6;
+			OFTindex = [R5+RESOURCE_TABLE_OFFSET+2*R4+1];
+
+			multipush(R1,R2,R3,R4,R5,R6);
+			
+			R1 = 4;
+			R2 = OFTindex;
+			call FILE_MANAGER;
+
+			multipop(R1,R2,R3,R4,R5,R6);
+			
+		endif;		
+		R4 = R4+ 1;
+
+			
+		
+	endwhile;
+	
+	//Calling release Page
+
+	multipush(R1,R2,R3);
+	
+	alias reqProcessTable R3;
+	reqProcessTable = PROCESS_TABLE + reqPID*16; 
+	
+	R1 = 2;
+	//Passing user area page number
+	R2 = [reqProcessTable + 11 ];
+
+	call MEMORY_MANAGER;
+
+	multipop(R1,R2,R3);
+
+
+
+endif;
+
+//Exit Process`
+if(functionNum==3) then
+	
+	alias reqProcessTable R3;
+	reqProcessTable = PROCESS_TABLE + reqPID*16; 
+	
+	//Calling free user area page
+	multipush (R1,R2,R3);
+	
+	R1 = 2;
+	R2 = reqPID; 	
+	
+	call PROCESS_MANAGER;
+	
+	multipop(R1,R2,R3);
+	
+	//Caling free page table
+	multipush (R1,R2,R3);
+	
+	R1 = 4;
+	R2 = reqPID;	
+	
+	call PROCESS_MANAGER;
+		
+	multipop(R1,R2,R3);
+
+	//MAKING ALL CHILD PROCESSES ORPHAN and freeing all process waiting for the required process to complete execution IF NOT FROM AN EXEC CALL
+	if( [reqProcessTable + 9] != 9 ) then
+		
+		R4 = 0;
+		while(R4<16) do
+			
+			if( [PROCESS_TABLE + R4*16 +2]==reqPID ) then
+				 [PROCESS_TABLE + R4*16 +2] = -1;
+			endif;
+			
+			if( [PROCESS_TABLE + R4*16 +4]=="WAIT_PROCESS"&& [PROCESS_TABLE + R4*16 +5]==reqPID) then
+				
+				[PROCESS_TABLE + R4*16 +4] = "READY";
+				
+			endif;
+			
+			R4 = R4 +1;
+		
+		endwhile;	
+	
+	endif;
+	
+	[reqProcessTable + 4] = "TERMINATED";
+	
+endif;
+
+//Free Page Table
+if(functionNum==4) then
+
+	alias i R3;
+	alias reqPageTable R4;
+	reqPageTable = PAGE_TABLE_BASE + reqPID*20;
+	i = 0;
+	
+	while(i<20) do
+		//Here you check if page number is -1 to check validity	
+		if([ reqPageTable +i]!=-1 ) then
+		
+			//Free that page if i is not 0 or 2
+			if(i!=0&&i!=2) then
+				
+				//calling Releasepage
+				multipush(R1,R2,R3,R4);
+				
+				R1 = 2;	
+				R2 = [reqPageTable +i];
+					
+				call MEMORY_MANAGER;
+				
+				multipop(R1,R2,R3,R4);
+				
+			
+			endif; 	
+			
+			[reqPageTable +i] = -1;
+			[ reqPageTable +i+1] = "0000";
+		
+		endif;
+		i = i+2;	
+			
+	endwhile;		
+	
+	//Checking heap and stack pages of DMT;
+	
+	if([DISK_MAP_TABLE + reqPID*10 + 2]!=-1) then 
+	
+		//Call ReleaseBlock
+		multipush(R1,R2);
+
+		R1 = 4;
+		R2 = [DISK_MAP_TABLE + reqPID*10 + 2];
+		R3 = reqPID;
+		call MEMORY_MANAGER;
+		
+		multipop(R1,R2);		
+
+	endif;
+	
+	if([DISK_MAP_TABLE + reqPID*10 + 3]!=-1) then 
+	
+		//Call ReleaseBlock
+		multipush(R1,R2);
+
+		R1 = 4;
+		R2 = [DISK_MAP_TABLE + reqPID*10 + 3];
+		R3 = reqPID;
+		call MEMORY_MANAGER;
+		
+		multipop(R1,R2);		
+
+	endif;
+
+	if([DISK_MAP_TABLE + reqPID*10 + 8]!=-1) then 
+	
+		//Call ReleaseBlock
+		multipush(R1,R2);
+
+		R1 = 4;
+		R2 = [DISK_MAP_TABLE + reqPID*10 + 8];
+		R3 = reqPID;
+		call MEMORY_MANAGER;
+		
+		multipop(R1,R2);		
+
+	endif;
+	
+	if([DISK_MAP_TABLE + reqPID*10 + 9]!=-1) then 
+	
+		//Call ReleaseBlock
+		multipush(R1,R2);
+
+		R1 = 4;
+		R2 = [DISK_MAP_TABLE + reqPID*10 + 9];
+		R3 = reqPID;
+		call MEMORY_MANAGER;
+		
+		multipop(R1,R2);		
+
+	endif;
+
+	//Invalidate all DMT entries
+	R5 =0;
+	while(R5<10) do
+
+		[DISK_MAP_TABLE + reqPID*10 +R5] = -1;
+		R5 = R5+1;
+	endwhile;
+
+endif;
+
+return;

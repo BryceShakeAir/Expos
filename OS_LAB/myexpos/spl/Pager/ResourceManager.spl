@@ -1,0 +1,246 @@
+alias functionNum R1;
+
+//acquireBuffer
+if(functionNum==1) then
+
+	alias bufferNum R2;
+	alias currPID R3;
+	alias currentProcessTable R4;
+	currentProcessTable = PROCESS_TABLE + currPID*16;
+
+	while([ BUFFER_TABLE + bufferNum*4 + 2]!=-1 ) do
+
+		[currentProcessTable + 4] = "WAIT_BUFFER";
+		[currentProcessTable + 5] = bufferNum;
+			
+		backup;
+
+		call CONTEXT_SWITCH;
+	
+		restore;
+
+	endwhile;
+
+	[ BUFFER_TABLE + bufferNum*4 + 2] = currPID;		
+
+endif;
+
+//releaseBuffer
+if(functionNum==2) then
+
+	alias bufferNum R2;
+	alias currPID R3;
+	alias currentProcessTable R4;
+	currentProcessTable = PROCESS_TABLE + currPID*16;
+
+	if(currPID== [ BUFFER_TABLE + bufferNum*4 + 2] ) then
+		
+		[ BUFFER_TABLE + bufferNum*4 + 2] = -1;
+		
+		R5 = 0;
+		while(R5<16) do
+
+			if([PROCESS_TABLE + R5*16 + 4]=="WAIT_BUFFER"&&[PROCESS_TABLE + R5*16 + 5]==bufferNum ) then
+				[PROCESS_TABLE + R5*16 + 4] = "READY"; 
+			endif;		
+			R5 = R5+1;
+		endwhile;
+
+		R0 = 0;
+	else
+		R0 = -1;
+	endif;
+
+endif;
+
+//acquireDisk
+if(functionNum==3) then
+
+	alias currentPID R2;
+	alias currentProcessTable R3;
+	currentProcessTable = PROCESS_TABLE + currentPID*16;
+	//busy loop to check if disk is free
+	while([DISK_STATUS_TABLE + 0]==1) do
+	
+		[currentProcessTable + 4] = "WAIT_DISK";	
+		backup;
+		call CONTEXT_SWITCH;
+		restore;		
+
+	endwhile;
+	//Locking the disk status table
+	[DISK_STATUS_TABLE + 0]=1;
+	[DISK_STATUS_TABLE + 4]=currentPID;
+	
+
+endif;
+
+//acquireInode
+if(functionNum==4) then
+
+	alias inodeIndex R2;
+	alias reqPID R3;
+	alias reqProcessTable R5;
+	
+	reqProcessTable = PROCESS_TABLE + reqPID*16;
+	
+	//1.If the inode is already acquired wait in busy loop
+	while( [FILE_STATUS_TABLE + inodeIndex*4 +0]!=-1 ) do
+
+		[reqProcessTable + 4] = "WAIT_FILE";
+		[reqProcessTable + 5] = inodeIndex;
+		backup;
+		call CONTEXT_SWITCH;
+		restore;
+
+	endwhile;
+
+	//2.check if file has been deleted
+	if( [ INODE_TABLE + inodeIndex*16 + 1]!=-1  ) then
+	
+	//3.Lock the file
+		[FILE_STATUS_TABLE + inodeIndex*4 +0] = reqPID;
+		R0 =0;
+	
+	else
+		
+		R0 = -1;
+	
+	endif;
+endif;
+
+//releaseInode
+if(functionNum==5) then
+
+	alias inodeIndex R2;
+	alias reqPID R3;
+	
+	if(reqPID==[FILE_STATUS_TABLE + inodeIndex*4 +0] ) then
+
+		//1.Release the lock
+		[FILE_STATUS_TABLE + inodeIndex*4 +0] = -1;
+
+		//2.Wake up all process Waiting for the file
+		R4 = 0;
+		while(R4<16) do
+			
+			if( [PROCESS_TABLE + R4*16 +4]=="WAIT_FILE"&&[PROCESS_TABLE + R4*16 +5]==inodeIndex ) then
+		
+				[PROCESS_TABLE + R4*16 +4]="READY";
+			
+			endif;	
+			R4 = R4+1;
+		
+		endwhile;
+		R0 = 0;
+	else
+		R0 = -1;	
+
+	endif;
+
+endif;
+
+//acquireSemaphore
+if(functionNum==6) then
+	
+	alias currentPID R2;
+	R3 = 0;
+	while(R3<32) do
+	
+		if( [SEMAPHORE_TABLE + R3*4 + 1] == 0) then
+		
+			break;
+		
+		endif; 
+		R3 = R3 +1;
+
+	endwhile;
+			
+	if(R3==32) then
+	
+		R0 = -1;
+	
+	else
+		[SEMAPHORE_TABLE + R3*4 + 1] = 1;
+		[SEMAPHORE_TABLE + R3*4 + 0] = -1;
+		R0 = R3;
+		
+	endif;
+		
+
+endif;
+
+//releaseSemaphore
+if(functionNum==7) then
+
+	alias semID R2;
+	alias currentPID R3;
+	
+	//Checking if the Process that is releasing has already locked semTable 
+	if( [SEMAPHORE_TABLE + semID*4 + 0]==currentPID ) then
+	
+		//Releasing all waiting processes
+		R4 = 0;
+		while(R4<16) do
+		
+			if([PROCESS_TABLE + R4*16 + 4]=="WAIT_SEM"&&[PROCESS_TABLE + R4*16 + 5]==semID) then
+			
+				[PROCESS_TABLE + R4*16 + 4] = "READY";
+			
+			endif;
+			
+			R4 = R4 + 1;
+		endwhile;
+		[SEMAPHORE_TABLE + semID*4 + 0] = -1;
+		
+	endif;			
+	[SEMAPHORE_TABLE + semID*4 + 1] = [SEMAPHORE_TABLE + semID*4 + 1] - 1; 
+		
+	R0 = 0;
+
+endif;
+
+//acquireTerminal
+if(functionNum==8) then
+	alias currentPID R2;
+	while( [TERMINAL_STATUS_TABLE + 0]==1 ) do
+		
+		//Changing the state of current process
+		[PROCESS_TABLE + currentPID*16 + 4 ] = "WAIT_TERMINAL";
+		//Pushing used reg
+		backup;
+		
+		call CONTEXT_SWITCH;	
+		
+		//Poping
+		restore;
+		
+	endwhile;
+	//Changing status field;
+	[TERMINAL_STATUS_TABLE + 0] = 1;
+	[TERMINAL_STATUS_TABLE + 1] = R2;
+endif;
+
+//releaseTerminal
+if( functionNum == 9 ) then
+
+	alias currentPID R2;
+	if( currentPID!= [TERMINAL_STATUS_TABLE + 1] ) then
+	//Here the PID of Terminal Table is different from current Pid		
+		R0 = -1;
+		return;	
+	endif;
+	[TERMINAL_STATUS_TABLE + 0] = 0;
+	//updating status of all process with WAIT_TERMINAL as status to READY
+	R4 = 0;
+	while(R4<16) do
+
+		if( [PROCESS_TABLE + R4*16 + 4 ]=="WAIT_TERMINAL" ) then
+				[PROCESS_TABLE + R4*16 + 4 ]="READY";
+		endif;
+		R4 = R4 + 1;
+	endwhile;
+	R0 = 0;
+endif;
+
+return;

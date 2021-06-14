@@ -1,0 +1,378 @@
+alias userSP R0;
+userSP = SP;
+alias currentPID R1;
+currentPID = [SYSTEM_STATUS_TABLE+CORE*5 +1];
+alias currProcessTable R2;
+currProcessTable = PROCESS_TABLE + currentPID*16;
+
+//Switch stk;
+[currProcessTable + 13] = SP;
+SP = [currProcessTable + 11]*512 -1;
+
+//Acquire_kernel_lock
+multipush(R0,R1,R2);
+R1 = 1;
+call ACCESS_CONTROL;
+multipop(R0,R1,R2);
+
+//Extracting sys call num
+alias sysNum R3;
+sysNum = [ [ PTBR + 2*( (userSP-5)/512 ) ]*512 + (userSP-5)%512  ]; 
+
+alias returnAddr R4;
+returnAddr = [ PTBR + 2*( (userSP-1)/512 ) ]*512 + (userSP-1)%512;
+
+
+alias uname R5;
+uname = [ [ PTBR + 2*( (userSP-4)/512 ) ]*512 + (userSP-4)%512  ]; 
+
+alias pwd R6;
+pwd = [ [ PTBR + 2*( (userSP-3)/512 ) ]*512 + (userSP-3)%512  ]; 
+
+//New User
+if(sysNum==22) then
+
+	[currProcessTable + 9] = 22;
+
+	
+	//1.Check if user is root and process is shell
+	if([SYSTEM_STATUS_TABLE+0]==1&&currentPID==2) then
+	
+		//2.Check if such a user is already present
+		
+		alias UTindex R7;
+		UTindex = 0;
+		
+		while(UTindex<MAX_USER_NUM) do
+		
+			if([USER_TABLE + 2*UTindex +0]== uname) then
+			
+				break;
+			
+			endif;	
+			UTindex = UTindex+1;
+		
+		endwhile;
+	
+		if(UTindex!=MAX_USER_NUM) then
+			breakpoint;
+			[returnAddr] = -1;
+		
+			//Reset mode
+			[currProcessTable + 9] = 0;
+
+			//releasing kernel lock
+			multipush(R2);
+
+			R1 = 4;
+			R2 = KERN_LOCK;
+			call ACCESS_CONTROL;
+
+			multipop(R2);			
+					
+			//Switch stk
+			SP = [currProcessTable + 13];
+			ireturn;
+					
+		endif;
+		
+		//3.Find a free entry and store details in the usertable
+		
+		UTindex = 0;
+		
+		while(UTindex<MAX_USER_NUM) do
+		
+			if([USER_TABLE + 2*UTindex +0]== -1) then
+				
+				encrypt pwd;
+				[USER_TABLE + 2*UTindex +0] = uname;
+				[USER_TABLE + 2*UTindex +1] = pwd;
+				
+				break;
+			
+			endif;	
+			UTindex = UTindex+1;
+		
+		endwhile;
+		
+		if(UTindex==MAX_USER_NUM) then
+		
+			[returnAddr] = -3;
+		
+			//Reset mode
+			[currProcessTable + 9] = 0;
+			//releasing kernel lock
+			multipush(R2);
+
+			R1 = 4;
+			R2 = KERN_LOCK;
+			call ACCESS_CONTROL;
+
+			multipop(R2);			
+					
+			//Switch stk
+			SP = [currProcessTable + 13];
+			ireturn;
+					
+		endif;
+		
+		[returnAddr] =0;
+	
+	else
+	
+		[returnAddr] = -2;
+	
+	endif;
+	
+
+endif;
+
+//Rem User
+if(sysNum==23) then
+
+	//Setting mode
+	[currProcessTable + 9] = 23;
+
+	//1.Check if user is root and currProc is shell
+	if([SYSTEM_STATUS_TABLE+0]==1&&currentPID==2) then
+	
+		//2.Check if user is root or kernel
+		if( uname=="root"||  uname=="kernel") then
+		
+			[returnAddr] = -2;
+			//Reset mode
+			[currProcessTable + 9] = 0;
+			//releasing kernel lock
+			multipush(R2);
+
+			R1 = 4;
+			R2 = KERN_LOCK;
+			call ACCESS_CONTROL;
+
+			multipop(R2);			
+					
+
+			//Switch stk
+			SP = [currProcessTable + 13];
+		
+			ireturn;			
+	
+		endif;
+		
+		alias utable R6;
+		utable = 0; 
+		
+		//3.Find the uname in utable 
+		
+		while(utable<MAX_USER_NUM) do
+		
+			if([USER_TABLE +2*utable +0]==uname) then
+				break;
+			endif;
+			
+			utable = utable+1;
+		
+		endwhile;
+		
+		if(utable==MAX_USER_NUM) then
+		
+			[returnAddr] = -1;
+			//Reset mode
+			[currProcessTable + 9] = 0;
+			//releasing kernel lock
+			multipush(R2);
+
+			R1 = 4;
+			R2 = KERN_LOCK;
+			call ACCESS_CONTROL;
+
+			multipop(R2);			
+					
+
+			//Switch stk
+			SP = [currProcessTable + 13];
+		
+			ireturn;		
+		
+		endif;
+		
+		//4.if there are files of the user present on disk
+		R7 = 0;
+		while(R7<MAX_FILE_NUM) do
+		
+			if([ROOT_FILE + R7*8 + 3]==uname&&[ROOT_FILE + R7*8 + 0]!=-1) then
+				break;					
+		
+			endif;
+			R7 = R7+1;
+			
+		endwhile;
+		if( R7==MAX_FILE_NUM ) then
+		
+			//5.Invalidate the entries in user table
+			
+			[USER_TABLE + utable*2 +0] = -1;
+			[USER_TABLE + utable*2 +1] = -1;
+			
+			[returnAddr] = 0;	
+		
+		else
+			//There are undeleted files owned by user 
+			[returnAddr] = -3;
+		
+		endif;
+	
+	else
+	
+		[returnAddr] = -2;
+	
+	endif;
+
+endif;
+
+//Setpwd
+if(sysNum==24) then
+
+	[currProcessTable + 9] = 24;
+	
+	encrypt pwd;
+	
+	//1.Check if current process is shell
+	
+	if(currentPID==2) then
+	
+		//2.Find the utableIndex
+		alias utableIndex R7;
+		utableIndex = 0;
+		while(utableIndex <MAX_USER_NUM ) do
+		
+			if([ USER_TABLE + 2*utableIndex + 0] ==uname) then
+				break;
+			endif;
+			utableIndex = utableIndex+1;
+		
+		endwhile;
+		//User doesnt exist
+		if(utableIndex==MAX_USER_NUM) then
+		
+			[returnAddr] = -2;
+			//Reset mode
+			[currProcessTable + 9] = 0;
+			//releasing kernel lock
+			multipush(R2);
+
+			R1 = 4;
+			R2 = KERN_LOCK;
+			call ACCESS_CONTROL;
+
+			multipop(R2);			
+					
+
+			//Switch stk
+			SP = [currProcessTable + 13];
+			ireturn;
+
+			
+		endif;
+		
+		//3.Check if utableIndex matches || if it is root user
+		
+		if(utableIndex!=[SYSTEM_STATUS_TABLE+0]&&[SYSTEM_STATUS_TABLE + 0]!=1 ) then
+		
+			[returnAddr] = -1;
+			//Reset mode
+			[currProcessTable + 9] = 0;
+			//releasing kernel lock
+			multipush(R2);
+
+			R1 = 4;
+			R2 = KERN_LOCK;
+			call ACCESS_CONTROL;
+
+			multipop(R2);			
+					
+			//Switch stk
+			SP = [currProcessTable + 13];
+			ireturn;
+		
+		endif;
+		//4.Set new pwd
+		
+		[USER_TABLE + 2*utableIndex + 1] = pwd;
+		
+		[returnAddr] = 0;
+	else 
+	
+		[returnAddr] = -1;
+	
+	endif;
+
+endif;
+
+//Getuname
+if(sysNum==25) then
+
+	[currProcessTable + 9] = 25;
+	alias userID R6;
+	userID= [ [ PTBR + 2*( (userSP-4)/512 ) ]*512 + (userSP-4)%512  ];
+
+	if(userID>=0||userID<16) then
+
+		if([USER_TABLE+2*userID +0]!=-1) then
+			
+			[returnAddr] =[USER_TABLE+2*userID +0] ;			
+					
+		else
+		
+			[returnAddr] =-1;
+		
+		endif;
+
+	else
+		
+		[returnAddr] = -1;
+	
+	endif;
+
+endif;
+
+//Getuid
+if(sysNum==26) then
+
+	[currProcessTable + 9] = 26;
+	R6 = 0;
+	while(R6<MAX_USER_NUM) do
+	
+		if([USER_TABLE+2*R6+0]==uname) then
+			break;
+		endif;
+ 		R6= R6+1;
+	endwhile;
+
+	if(R6==MAX_USER_NUM) then
+	
+		//Invalid username
+		[returnAddr] = -1;
+		
+	else
+		[returnAddr] =R6;
+	
+	endif;
+
+endif;
+
+//Reset mode
+[currProcessTable + 9] = 0;
+//releasing kernel lock
+multipush(R2);
+
+R1 = 4;
+R2 = KERN_LOCK;
+call ACCESS_CONTROL;
+
+multipop(R2);								
+
+//Switch stk
+SP = [currProcessTable + 13];
+ireturn;
+

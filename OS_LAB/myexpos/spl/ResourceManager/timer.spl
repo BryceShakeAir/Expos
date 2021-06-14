@@ -1,0 +1,25 @@
+[ PROCESS_TABLE + [ SYSTEM_STATUS_TABLE + 1 ]*16 + 13 ] = SP;
+SP = [ PROCESS_TABLE + [ SYSTEM_STATUS_TABLE + 1 ]*16 + 11 ]*512 - 1;
+backup;
+
+R12 = 0;
+//Incrementing TICK Value
+//breakpoint;
+while(R12<16) do
+
+	[PROCESS_TABLE + R12*16 ] = [PROCESS_TABLE + R12*16 ] + 1;
+	R12 = R12 + 1;
+
+endwhile;
+
+[ PROCESS_TABLE + [ SYSTEM_STATUS_TABLE + 1 ]*16 + 4 ] = "READY";
+
+breakpoint;
+call CONTEXT_SWITCH;
+
+[ PROCESS_TABLE + [ SYSTEM_STATUS_TABLE + 1 ]*16 + 9 ] = 0;
+
+restore;
+SP = [ PROCESS_TABLE + [ SYSTEM_STATUS_TABLE + 1 ]*16 + 13 ];
+//breakpoint;
+ireturn;

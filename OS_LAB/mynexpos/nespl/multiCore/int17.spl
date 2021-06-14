@@ -1,0 +1,130 @@
+alias userSP R0;
+userSP = SP;
+alias currentPID R1;
+currentPID = [SYSTEM_STATUS_TABLE+CORE*5 +1];
+alias currProcessTable R2;
+currProcessTable = PROCESS_TABLE + currentPID*16;
+
+//Switch stk;
+[currProcessTable + 13] = SP;
+SP = [currProcessTable + 11]*512 -1;
+
+//Acquire_kernel_lock
+multipush(R0,R1,R2);
+R1 = 1;
+call ACCESS_CONTROL;
+multipop(R0,R1,R2);
+
+//Extracting sys call num
+alias sysNum R3;
+sysNum = [ [ PTBR + 2*( (userSP-5)/512 ) ]*512 + (userSP-5)%512  ]; 
+
+alias returnAddr R4;
+returnAddr = [ PTBR + 2*( (userSP-1)/512 ) ]*512 + (userSP-1)%512;
+
+//Login syscall
+if(sysNum==27) then
+
+		alias uname R5;
+		uname=[ [ PTBR + 2*( (userSP-4)/512 ) ]*512 + (userSP-4)%512 ];
+		alias pwd R6;
+		pwd = [ [ PTBR + 2*( (userSP-3)/512 ) ]*512 + (userSP-3)%512 ];
+			
+		//setting mode flag
+		[currProcessTable + 9] = 27;
+			
+		//1.Check if current process is login
+		if( currentPID==1 ) then
+		
+			//2.Check if uname and password is valid	
+			alias userID R7;
+			R7 = 0;
+			
+			//encrypting the password
+			encrypt pwd;
+			while(R7<MAX_USER_NUM) do
+			
+				if( [USER_TABLE +R7*2 + 0 ]==uname&& [USER_TABLE +R7*2 + 1 ]==pwd) then
+					
+					break;
+				
+				endif;
+				R7 = R7+1;
+			endwhile;	
+			
+			if(R7==MAX_USER_NUM) then
+			
+				[returnAddr] = -1; 
+				//Reset mode
+				[currProcessTable + 9] = 0;
+				//releasing kernel lock
+				multipush(R2);
+
+				R1 = 4;
+				R2 = KERN_LOCK;
+				call ACCESS_CONTROL;
+
+				multipop(R2);			
+					
+
+				//Switch stk
+				SP = [currProcessTable + 13];
+				ireturn;
+
+			endif;	
+			
+			//3.Change state of shell process and userid
+			
+			[PROCESS_TABLE + 2*16 + 4] = "CREATED";	
+			[PROCESS_TABLE + 2*16 + 3] = userID;
+			
+			//4.Set current user in SST
+			
+			[SYSTEM_STATUS_TABLE+0] =userID ;
+				
+			//5.Change state of login process 
+
+			[currProcessTable + 4] = "WAIT_PROCESS";
+			[currProcessTable + 5] = 2;			
+
+			//6.Context switch
+			
+			multipush(R0,R1,R2,R3,R4,R5,R6,R7);
+			//releasing kernel lock
+
+			R1 = 4;
+			R2 = KERN_LOCK;
+			call ACCESS_CONTROL;
+					
+			call CONTEXT_SWITCH;
+
+			//Acquire_kernel_lock
+			R1 = 1;
+			call ACCESS_CONTROL;
+						
+			multipop(R0,R1,R2,R3,R4,R5,R6,R7);
+			
+			[returnAddr] = 0;
+		else
+			
+			[returnAddr] = -2;
+		
+		endif;
+		
+endif;
+
+//Reset mode
+[currProcessTable + 9] = 0;
+//releasing kernel lock
+multipush(R2);
+
+R1 = 4;
+R2 = KERN_LOCK;
+call ACCESS_CONTROL;
+
+multipop(R2);			
+					
+//Switch stk
+SP = [currProcessTable + 13];
+ireturn;
+

@@ -1,0 +1,42 @@
+0
+2056
+0
+0
+0
+0
+0
+0
+MOV R1, 0
+MOV R0, 1
+MOV R3, 1
+GE R3, R0
+JZ R3,3032
+BRKP
+MOV R3, R0
+MUL R3, R0
+ADD R3, R1
+MOV R1, R3 // saving register context
+PUSH R0
+PUSH R1
+PUSH R3 // pushing system call number and arguments
+MOV R0, 5
+MOV R2, -2
+PUSH R0
+PUSH R2
+PUSH R1
+PUSH R0 //  pushing space for return value
+PUSH R0
+INT 7   // poping out return value and ignore
+POP R1  // pop out argumnets and system call number and ignore
+POP R1
+POP R1
+POP R1
+POP R1  //  restoring the register context
+POP R3
+POP R1
+POP R0 //continue execution
+MOV R3, R0
+ADD R3, 1
+MOV R0, R3
+JMP 2060
+INT 10

@@ -1,0 +1,218 @@
+
+alias currentPID R0;
+alias currentProcessTable R1;
+alias userSP R2;
+currentPID = [SYSTEM_STATUS_TABLE + 1 ];
+currentProcessTable = PROCESS_TABLE + currentPID*16;
+userSP = SP;
+
+//Setting the mode in process Table
+[currentProcessTable + 9] = 9;
+
+//Switching stk
+[ currentProcessTable + 13 ] = SP;
+SP = [currentProcessTable + 11]*512-1;
+
+//check if file is present in inode table
+
+alias inodeIndex R4;
+inodeIndex = 0;
+alias fileName R5;
+R6 = (userSP-4)/512;
+R7 = (userSP-4 )%512;
+R8 = [ [ currentProcessTable + 14 ] +R6*2 ]*512 + R7;
+fileName = [R8];
+
+while( inodeIndex < MAX_FILE_NUM ) do
+
+	R8 = [INODE_TABLE + inodeIndex*16 + 1];
+		
+	if(R8==fileName) then
+			
+		break;
+	endif;
+	
+	inodeIndex = inodeIndex + 1;
+	
+endwhile;
+
+		//Checking if the file is in XEXE file format i.e checking magic number
+if(inodeIndex==60 ||  [INODE_TABLE + inodeIndex*16 + 0]!=EXEC ) then
+		
+		//Switch stk
+		SP = [ currentProcessTable + 13 ];
+
+		//setting mode
+		[currentProcessTable + 9] = 0;
+		
+		//Setting return value;
+		
+		R6 = (userSP-1)/512;
+		R7 = (userSP-1 )%512;
+		alias returnAddr R8;
+		returnAddr = [ [ currentProcessTable + 14 ] +R6*2 ]*512 + R7;
+		[returnAddr] = -1;
+
+		ireturn;
+		
+		
+endif;
+
+
+//Calling Exit Process
+
+multipush(R0,R1,R2,R3,R4,R5);
+
+R1 = 3;
+R2 = currentPID;
+
+call PROCESS_MANAGER;
+
+multipop(R0,R1,R2,R3,R4,R5);
+
+
+//Reclaiming User Area Page by decreasing MFC and increasing MFL
+
+[SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] - 1;
+[MEMORY_FREE_LIST + [currentProcessTable + 11] ] = [MEMORY_FREE_LIST + [currentProcessTable + 11] ] + 1;
+
+//Setting SP to start of kernel stk
+SP = [currentProcessTable + 11]*512-1;
+
+//Update state and inode index in ProcessTable
+
+[ currentProcessTable + 4 ] = "RUNNING";
+[ currentProcessTable + 7 ] = inodeIndex;
+
+//Allocate new pages and set the page table entries for the new process
+
+//Setting up library
+PTBR = PAGE_TABLE_BASE + currentPID*20;
+
+[PTBR+0] = 63;
+[PTBR+1] = "0100";
+
+[PTBR+2] = 64;
+[PTBR+3] = "0100";
+
+//Invalidating entries of heap
+
+alias newPage R6;
+
+[PTBR+4] = -1;
+[PTBR+5] = "0000";
+
+[PTBR+6] = -1;
+[PTBR+7] = "0000";
+
+//Setting up new Stack
+
+multipush(R0,R1,R2,R3,R4,R5,PTBR);
+
+R1 = 1;
+
+call MEMORY_MANAGER;
+
+newPage = R0;
+multipop(R0,R1,R2,R3,R4,R5,PTBR);
+
+[PTBR+16] = newPage;
+[PTBR+17] = "0110";
+
+multipush(R0,R1,R2,R3,R4,R5,PTBR);
+
+R1 = 1;
+
+call MEMORY_MANAGER;
+
+newPage = R0;
+multipop(R0,R1,R2,R3,R4,R5,PTBR);
+
+[PTBR+18] = newPage;
+[PTBR+19] = "0110";
+
+//Setting up the code pages
+
+alias blockNum R7;
+
+blockNum = [INODE_TABLE + inodeIndex*16 + 8 ]; 
+
+multipush(R0,R1,R2,R3,R4,R5,R7,PTBR);
+
+R1 = 5;
+R2 = blockNum;
+call MEMORY_MANAGER;
+
+newPage = R0;
+
+multipop(R0,R1,R2,R3,R4,R5,R7,PTBR);
+
+//Setting the page table of first code page
+[PTBR + 8] = newPage;
+[PTBR + 9] = "0100";
+
+R9 = 10;
+
+//Invalidating all other entries
+while(R9<16) do
+
+	[PTBR + R9] = -1;
+	[PTBR + R9 + 1] = "0000"; 
+	R9 = R9+2;
+	
+endwhile;
+
+//Setting up the new entry point
+
+newPage = [PTBR+8];
+alias stkPage R9;
+stkPage = [PTBR + 16];
+[ stkPage*512 ] =  [ newPage*512 + 1 ];
+
+//Setting PerProcessResourceTable
+
+alias ResourceTableEntry R10;
+
+ResourceTableEntry = ([currentProcessTable + 11]+1)*512 -20;
+
+while(ResourceTableEntry < ([currentProcessTable + 11]+1)*512 ) do
+	
+	[ ResourceTableEntry ] = -1;
+	ResourceTableEntry = ResourceTableEntry +1;
+
+endwhile;
+
+//setting up Disk Map Table 
+alias currentDMT R11;
+currentDMT = DISK_MAP_TABLE + currentPID*10;
+
+//Invalidating all entries in DMT beforehand
+R12 = 0;
+while(R12<10) do
+
+	[currentDMT + R12] = -1;
+	R12 = R12 + 1;
+endwhile;
+
+
+//Setting the code pages in DMT
+
+R12 = 0;
+while( ([INODE_TABLE + inodeIndex*16 + 8 + R12 ]!=-1)&& ( R12 < 4)  )  do
+
+	[currentDMT + 4 + R12 ] = [INODE_TABLE + inodeIndex*16 + 8 + R12 ];
+	R12 = R12 + 1;
+	
+endwhile;
+
+
+ 
+ 
+//Switch stk The stk should point to the new top of the user stack
+SP = 8*512;
+
+//setting mode
+[currentProcessTable + 9] = 0;
+
+ireturn;
+

@@ -1,0 +1,2 @@
+load --int=5 ../nespl/multiCore/int5.xsm
+load --int=6 ../nespl/multiCore/int6.xsm

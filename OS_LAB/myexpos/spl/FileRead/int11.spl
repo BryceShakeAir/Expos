@@ -1,0 +1,102 @@
+alias userSP R0;
+userSP = SP;
+alias currentPID R1;
+currentPID = [SYSTEM_STATUS_TABLE+1];
+alias currProcessTable R2;
+currProcessTable = PROCESS_TABLE + currentPID*16;
+
+//Switch stk;
+[currProcessTable + 13] = SP;
+SP = [currProcessTable + 11]*512 -1;
+
+//Extracting sys call num
+alias sysNum R3;
+sysNum = [ [ PTBR + 2*( (userSP-5)/512 ) ]*512 + (userSP-5)%512  ]; 
+
+alias returnAddr R4;
+returnAddr = [ PTBR + 2*( (userSP-1)/512 ) ]*512 + (userSP-1)%512;
+
+//Get PID
+if(sysNum==11) then
+
+	//Setting mode flag
+	[currProcessTable + 9] = 11;
+	
+	[returnAddr] = [currProcessTable +1];
+
+
+endif;
+
+
+//GET PPID
+if(sysNum==12) then
+
+	//Setting mode flag
+	[currProcessTable + 9] = 12;
+	[returnAddr] = [currProcessTable +2];
+
+endif;
+
+//Wait sys call
+
+if(sysNum==13) then
+
+	//Setting mode flag
+	[currProcessTable + 9] = 13;
+	//Extracting argument;
+	alias waitPID R5;
+	waitPID = [ [ PTBR + 2*( (userSP-4)/512 ) ]*512 + (userSP-4)%512];
+	
+	if(waitPID==currentPID || [PROCESS_TABLE +waitPID*16 +4]=="TERMINATED" || waitPID<0 || waitPID > 15 ) then
+	
+		[returnAddr] = -1;
+		
+	else	
+		breakpoint;
+		[currProcessTable + 4 ] = "WAIT_PROCESS";
+		[currProcessTable + 5] = waitPID;	
+
+		//Calling context switch
+		multipush(R0,R1,R2,R3,R4,R5);
+		
+		call CONTEXT_SWITCH;
+		
+		multipop(R0,R1,R2,R3,R4,R5);
+		
+			
+	
+		[returnAddr] = 0;
+	endif;
+
+endif;
+
+//Signal sys call
+
+if(sysNum==14) then
+	
+	//Setting mode flag
+	[currProcessTable + 9] = 14;
+	R5 = 0;
+	while(R5<16) do
+	
+		if( [PROCESS_TABLE + R5*16 +4] =="WAIT_PROCESS"&& [PROCESS_TABLE + R5*16 +5]==currentPID ) then
+		
+			[PROCESS_TABLE + R5*16 +4] = "READY";	
+		
+		endif;
+		
+		R5 = R5 +1; 
+	endwhile;
+
+	[returnAddr] = 0;
+
+endif;
+ 
+
+//Reset mode
+[currProcessTable + 9] = 0;
+
+//Switch stk
+SP = [currProcessTable + 13];
+
+ireturn;

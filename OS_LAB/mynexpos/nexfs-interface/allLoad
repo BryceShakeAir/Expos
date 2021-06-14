@@ -1,0 +1,33 @@
+load --module 0 ../nespl/multiCore/ResourceManager.xsm
+load --module 1 ../nespl/multiCore/ProcessManager.xsm
+load --module 2 ../nespl/multiCore/MemoryManager.xsm
+load --module 3 ../nespl/multiCore/FileManager.xsm
+load --module 4 ../nespl/multiCore/deviceManager.xsm
+load --module 5 ../nespl/multiCore/scheduler.xsm
+load --module 6 ../nespl/multiCore/PagerModule.xsm
+load --module 7 ../nespl/multiCore/boot1.xsm
+load --module 8 ../nespl/multiCore/accessCM.xsm
+load --os=primary ../nespl/multiCore/osStartupBoot.xsm
+load --os=secondary ../nespl/multiCore/osStartupBoot2.xsm
+load --idle ../expl/multiCore/idle.xsm
+load --init ../expl/multiCore/login.xsm
+load --shell ../expl/multiCore/shell.xsm
+load --library ../expl/library.lib
+load --int=timer ../nespl/multiCore/timer.xsm
+load --int=console ../nespl/multiCore/console.xsm
+load --int=disk ../nespl/multiCore/disk.xsm
+load --exhandler ../nespl/multiCore/exception.xsm
+load --int=4 ../nespl/multiCore/int4.xsm
+load --int=5 ../nespl/multiCore/int5.xsm
+load --int=6 ../nespl/multiCore/int6.xsm
+load --int=7 ../nespl/multiCore/int7.xsm
+load --int=8 ../nespl/multiCore/int8.xsm
+load --int=9 ../nespl/multiCore/exec.xsm
+load --int=10 ../nespl/multiCore/int10.xsm
+load --int=11 ../nespl/multiCore/int11.xsm
+load --int=12 ../nespl/multiCore/int12.xsm
+load --int=13 ../nespl/multiCore/int13.xsm
+load --int=14 ../nespl/multiCore/int14.xsm
+load --int=15 ../nespl/multiCore/int15.xsm
+load --int=16 ../nespl/multiCore/int16.xsm
+load --int=17 ../nespl/multiCore/int17.xsm

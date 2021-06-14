@@ -1,0 +1,77 @@
+int main()
+{
+	decl
+	
+		int pid1,pid2,temp,i1,i2,i3,i4;
+		
+	enddecl
+	
+	begin
+	
+	pid1 = exposcall("Fork");
+	pid2 = exposcall("Fork");
+	breakpoint;
+	if(pid1!=0) then
+	
+		if(pid2!=0) then
+	
+		i1 = 100;
+		while(i1<199) do
+		
+			temp = exposcall("Write",-2,i1);
+			i1= i1+1;
+		endwhile;
+
+		temp = exposcall("Wait",pid2);
+		temp = exposcall("Wait",pid1);
+		
+		endif;
+
+
+	endif;
+	if(pid1!=0) then
+	
+		if(pid2==0) then
+		
+		i2 = 1000;
+		while(i2<1099) do
+		
+			temp = exposcall("Write",-2,i2);
+			i2= i2+1;
+		endwhile;
+		
+		endif;
+	endif;
+	if(pid1==0) then
+	
+		if(pid2!=0) then	
+		
+		i3 = 2000;
+		while(i3<2099) do
+			temp = exposcall("Write",-2,i3);
+			i3= i3+1;
+		endwhile;
+		
+		temp = exposcall("Wait",pid2);
+
+		endif;
+	endif;
+	if(pid1==0) then
+	
+		if(pid2==0) then
+	
+		i4 = 3000;
+		while(i4<3099) do
+		
+			temp = exposcall("Write",-2,i4);
+			i4= i4+1;
+		endwhile;
+		
+		endif;
+	endif;
+	
+	
+	return 0;
+	
+	end
+}

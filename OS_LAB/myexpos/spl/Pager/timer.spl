@@ -1,0 +1,134 @@
+[ PROCESS_TABLE + [ SYSTEM_STATUS_TABLE + 1 ]*16 + 13 ] = SP;
+SP = [ PROCESS_TABLE + [ SYSTEM_STATUS_TABLE + 1 ]*16 + 11 ]*512 - 1;
+backup;
+
+alias currProcessTable R1;
+currProcessTable = PROCESS_TABLE + [ SYSTEM_STATUS_TABLE + 1 ]*16;
+
+//1.If paging status is set
+if( [SYSTEM_STATUS_TABLE+5]!=0 ) then
+
+	//2.If the process is idle it is blocked for some disk op
+	if([SYSTEM_STATUS_TABLE + 1]==0 ) then
+		
+		[ currProcessTable + 4 ] = "READY";
+	
+		multipush(R1);
+
+		call CONTEXT_SWITCH;
+
+		multipop(R1);
+
+		[ currProcessTable + 9 ] = 0;
+
+		restore;
+		SP = [ PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1]*16 + 13 ];
+
+		ireturn;		
+
+	endif;
+	//3.If it is swapper daemon then perform appropriate action
+	if([SYSTEM_STATUS_TABLE + 1]==15 ) then
+	
+		//Checking paging status
+		if([SYSTEM_STATUS_TABLE + 5]==SWAP_OUT  ) then
+		
+			multipush(R1);	 	
+		
+			R1 = SWAP_OUT;
+			R2 = [SYSTEM_STATUS_TABLE + 1];
+			call PAGER_MODULE;
+		
+			multipop(R1);
+		
+		else
+		
+			multipush(R1);	 	
+		
+			R1 = SWAP_IN;
+			R2 = [SYSTEM_STATUS_TABLE + 1];
+			call PAGER_MODULE;
+		
+			multipop(R1);
+		
+		endif;
+	
+	endif;
+
+else
+
+	//4.Check if free space is below threshold
+	
+	if([SYSTEM_STATUS_TABLE + 2]<MEM_LOW) then
+	
+		[SYSTEM_STATUS_TABLE + 5] = SWAP_OUT;
+	
+	else
+		
+		//5.else check if there are process to be swapped in
+	
+		if([SYSTEM_STATUS_TABLE + 4]!= 0) then
+		
+			//6.Check if there is a swapped process with tick greater than threshold or if free mem > MEM_HIGH
+			alias flag R2;
+			flag = 0;
+			alias PID R3;
+			PID = 3;
+			
+			while(PID<15) do
+			
+				if( [PROCESS_TABLE+PID*16 +0]>MAX_TICK && [PROCESS_TABLE+PID*16 +6]==1) then
+				
+					flag = 1;
+					break;
+				
+				endif;
+				
+				PID = PID+1;
+			
+			endwhile;
+			
+			if([SYSTEM_STATUS_TABLE +2]>MEM_HIGH ) then
+				
+				flag = 1;
+				
+			endif;
+			
+			if(flag==1) then
+			
+				//Some process should be swapped in
+				[SYSTEM_STATUS_TABLE+5] = SWAP_IN;
+				
+			endif;
+		
+		endif;
+	
+	endif;
+
+
+endif;
+
+R12 = 0;
+//Incrementing TICK Value
+
+while(R12<16) do
+
+	[PROCESS_TABLE + R12*16 ] = [PROCESS_TABLE + R12*16 ] + 1;
+	R12 = R12 + 1;
+
+endwhile;
+
+[ currProcessTable + 4 ] = "READY";
+
+multipush(R1);
+
+call CONTEXT_SWITCH;
+
+multipop(R1);
+
+[ currProcessTable + 9 ] = 0;
+
+restore;
+SP = [ PROCESS_TABLE +[SYSTEM_STATUS_TABLE + 1]*16 + 13 ];
+
+ireturn;

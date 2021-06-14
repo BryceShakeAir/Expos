@@ -1,0 +1,35 @@
+type
+    List
+    {
+        int data;
+        List next;
+    }
+endtype
+int main()
+{
+	
+	decl
+
+		int x, semid,pid;
+  		List p1,p2;
+	
+	enddecl
+	begin
+	
+		x = initialize();
+		p1 = alloc();
+		p2 = alloc(); 
+		p1.data = 1;
+		p2.data = 2;
+		//semid = exposcall("Semget");
+		pid = exposcall("Fork");
+		if(pid!=0) then
+			x = exposcall("Wait",pid);
+			x = exposcall("Write",-2,p1.data);
+		else
+			p1 = p2;
+			x = exposcall("Exit");		
+		endif;
+		return 0;
+	end
+}

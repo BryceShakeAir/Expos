@@ -1,0 +1,28 @@
+//Switch stk
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE+1]*16 +13] = SP;
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE+1]*16 +11]*512-1;
+
+//Backup
+backup;
+
+//changing status of Disk Status Table
+[DISK_STATUS_TABLE + 0] = 0;
+
+//Changing STATE of all waiting process to READY
+alias reqPID  R1;
+reqPID = 1;
+while(reqPID<16) do
+
+	if([PROCESS_TABLE +reqPID*16 + 4]=="WAIT_DISK" ) then
+		[PROCESS_TABLE +reqPID*16 + 4] = "READY";	
+	endif;
+	reqPID = reqPID+1;	
+endwhile;
+
+
+//Restore
+restore;
+//Switch stk
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE+1]*16 +13];
+breakpoint;
+ireturn;

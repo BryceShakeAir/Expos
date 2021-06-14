@@ -1,0 +1,62 @@
+//Setting Mode
+[PROCESS_TABLE +[SYSTEM_STATUS_TABLE + 1]*16 + 9] = 5;
+
+
+//switching stack
+[PROCESS_TABLE +[SYSTEM_STATUS_TABLE + 1]*16 + 13] = SP;
+
+SP = [PROCESS_TABLE +[SYSTEM_STATUS_TABLE + 1]*16 + 11]*512 - 1;
+
+backup;
+
+//Storing userSp 
+alias userSP R0;
+userSP = [PROCESS_TABLE +[SYSTEM_STATUS_TABLE + 1]*16 + 13];
+
+
+//Translating userSP -4 i.e. arg 1
+alias fileDescPhysicalAddr R3;
+alias fileDescriptor R4;
+R1 = (userSP-4)%512;
+R2 = (userSP-4)/512;
+fileDescPhysicalAddr = [PTBR+R2*2]*512 + R1;
+fileDescriptor = [fileDescPhysicalAddr];
+
+//Checking if file desc is valid
+alias returnAddr R5;
+R1 = (userSP-1)%512;
+R2 = (userSP-1)/512;
+returnAddr = [PTBR+R2*2]*512 + R1;
+
+if(fileDescriptor !=-2)
+then
+	[returnAddr] = -1;
+else
+	alias word R6;
+	R1 = (userSP-3)%512;
+	R2 = (userSP-3)/512;
+	word = [PTBR+R2*2]*512 + R1;
+	
+	//backing up before calling device manager module	
+	backup;
+	
+	R1 = 3;
+	R2 = [SYSTEM_STATUS_TABLE + 1];
+	R3 = [word];
+	
+	breakpoint;
+	call DEVICE_MANAGER;
+	
+	restore;
+
+	[returnAddr] = 0;
+endif;
+
+//Setting SP back
+restore;
+SP = [PROCESS_TABLE +[SYSTEM_STATUS_TABLE + 1]*16 + 13];
+
+//Setting back mode
+[PROCESS_TABLE +[SYSTEM_STATUS_TABLE + 1]*16 + 9] = 0;
+breakpoint;
+ireturn;

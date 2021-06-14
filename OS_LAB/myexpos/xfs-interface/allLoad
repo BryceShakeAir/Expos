@@ -1,0 +1,10 @@
+load --os $HOME/Desktop/S5/OS_LAB/myexpos/spl/samples/osStartup.xsm
+load --init $HOME/Desktop/S5/OS_LAB/myexpos/spl/samples/init.xsm
+load --library $HOME/Desktop/S5/OS_LAB/myexpos/expl/library.lib
+load --int=10 $HOME/Desktop/S5/OS_LAB/myexpos/spl/samples/haltprog.xsm
+load --exhandler $HOME/Desktop/S5/OS_LAB/myexpos/spl/samples/haltprog.xsm
+load --idle $HOME/Desktop/S5/OS_LAB/myexpos/expl/samples/idle.xsm
+load --module 7 $HOME/Desktop/S5/OS_LAB/myexpos/spl/samples/boot1.xsm
+load --int=timer $HOME/Desktop/S5/OS_LAB/myexpos/spl/samples/timer.xsm
+load --int=7 $HOME/Desktop/S5/OS_LAB/myexpos/spl/samples/int7.xsm
+

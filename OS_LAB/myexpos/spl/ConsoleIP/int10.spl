@@ -1,0 +1,22 @@
+SP = [PROCESS_TABLE + 11 ]*512 - 1;
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE +1]*16 + 4 ] = "TERMINATED";
+alias remPID R0;
+remPID = 1;
+while(  remPID<16  ) do
+	
+	if( [PROCESS_TABLE + [remPID]*16 + 4 ] !="TERMINATED" ) then
+		break;	
+	endif;
+	remPID = remPID + 1;
+endwhile;
+
+if(remPID==16) then
+	
+	breakpoint;
+	halt;
+else
+	
+	call CONTEXT_SWITCH;	
+
+endif;
+

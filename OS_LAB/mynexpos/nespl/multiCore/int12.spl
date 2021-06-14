@@ -1,0 +1,134 @@
+alias userSP R0;
+userSP = SP;
+alias currentPID R1;
+currentPID = [SYSTEM_STATUS_TABLE+CORE*5 +1];
+alias currProcessTable R2;
+currProcessTable = PROCESS_TABLE + currentPID*16;
+
+//Switch stk;
+[currProcessTable + 13] = SP;
+SP = [currProcessTable + 11]*512 -1;
+
+//Acquire_kernel_lock
+multipush(R0,R1,R2);
+R1 = 1;
+call ACCESS_CONTROL;
+multipop(R0,R1,R2);
+
+//Extracting sys call num
+alias sysNum R3;
+sysNum = [ [ PTBR + 2*( (userSP-5)/512 ) ]*512 + (userSP-5)%512  ]; 
+
+alias returnAddr R4;
+returnAddr = [ PTBR + 2*( (userSP-1)/512 ) ]*512 + (userSP-1)%512;
+
+//Logout sys call
+if(sysNum==28) then
+	
+
+	//Setting mode
+	[currProcessTable + 9] = 28;
+	
+	//Setting logout status
+	[SYSTEM_STATUS_TABLE +7] = 1;
+	while([SYSTEM_STATUS_TABLE +6]!=14) do
+
+		//release_kernel_lock
+		multipush(R0,R1,R2,R3,R4);
+		R1 = 4;
+		R2 = KERN_LOCK;
+		call ACCESS_CONTROL;
+
+		call CONTEXT_SWITCH;
+
+		//acquire_ker_lock
+		R1 = 1;
+		call ACCESS_CONTROL;
+
+		multipop(R0,R1,R2,R3,R4);	
+
+	endwhile;
+
+
+	//1.Check if currProcess is shell
+	
+	if(currentPID==2) then
+	
+		//2.terminate all process except idle, shell and login
+		
+		multipush(R0,R1,R2,R3,R4);
+		
+		R2 = currentPID;
+		R1 = 5;
+		
+		call PROCESS_MANAGER;
+		
+		multipop(R0,R1,R2,R3,R4);
+		
+		//Setting logout status
+		[SYSTEM_STATUS_TABLE +7] = 0;
+		
+		//3.Set state of shell process to terminated
+		
+		[currProcessTable+4]="TERMINATED";
+		
+		//4.Set entry point on top of userStk
+		
+		alias userStkAddr R5;
+		userStkAddr = [PTBR + 16]*512;
+		
+		[userStkAddr] = [ [PTBR+8]*512 + 1 ];
+		
+		[currProcessTable + 13] = 4096;
+		
+		//5.Reset currentUserID in SST to kernel
+		
+		[SYSTEM_STATUS_TABLE + 0] = 0;
+		
+		//6.Wake up login process
+		
+		[PROCESS_TABLE + 16 + 4] = "READY";
+		
+		//7.context_switch
+		
+		multipush(R0,R1,R2,R3,R4,R5);
+		
+		//releasing kernel lock
+
+		R1 = 4;
+		R2 = KERN_LOCK;
+		call ACCESS_CONTROL;
+
+		call CONTEXT_SWITCH;
+		
+		//Acquire_kernel_lock
+		R1 = 1;
+		call ACCESS_CONTROL;
+
+		multipop(R0,R1,R2,R3,R4,R5);
+	
+		[returnAddr] = 0;
+		
+	else
+		
+		[returnAddr] = -1;
+	
+	endif;
+
+endif;
+
+//Reset mode
+[currProcessTable + 9] = 0;
+
+//releasing kernel lock
+multipush(R2);
+
+R1 = 4;
+R2 = KERN_LOCK;
+call ACCESS_CONTROL;
+
+multipop(R2);
+
+//Switch stk
+SP = [currProcessTable + 13];
+ireturn;

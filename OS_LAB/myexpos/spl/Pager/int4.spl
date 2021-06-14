@@ -1,0 +1,263 @@
+
+alias userSP R0;
+userSP = SP;
+alias currentPID R1;
+currentPID = [SYSTEM_STATUS_TABLE+1];
+alias currProcessTable R2;
+currProcessTable = PROCESS_TABLE + currentPID*16;
+
+//Switch stk;
+[currProcessTable + 13] = SP;
+SP = [currProcessTable + 11]*512 -1;
+
+//Extracting sys call num
+alias sysNum R3;
+sysNum = [ [ PTBR + 2*( (userSP-5)/512 ) ]*512 + (userSP-5)%512  ]; 
+
+alias returnAddr R4;
+returnAddr = [ PTBR + 2*( (userSP-1)/512 ) ]*512 + (userSP-1)%512;
+
+//Create sys call
+if(sysNum==1) then 
+
+	//change the mode 
+	[currProcessTable + 9] = 1;
+	
+	//1. Get a free inode entry
+	alias inodeIndex R5;
+	alias fileName R6;
+	alias permission R7;
+	fileName = [ [ PTBR + 2*( (userSP-4)/512 ) ]*512 + (userSP-4)%512  ];
+	permission = [ [ PTBR + 2*( (userSP-3)/512 ) ]*512 + (userSP-3)%512  ];
+	
+	inodeIndex = 0;
+	while(inodeIndex<MAX_FILE_NUM) do
+	
+		if([INODE_TABLE +inodeIndex*16 + 1]==fileName) then
+		
+			[returnAddr] =0;
+			//Reset mode
+			[currProcessTable + 9] = 0;
+			//Switch stk
+			SP = [currProcessTable + 13];
+			ireturn;
+		
+		endif;
+	
+		if([INODE_TABLE +inodeIndex*16 + 1]==-1 ) then
+			
+			//2.Updating inode and Root table
+			
+			//Type Name Size UserID Perm
+			[INODE_TABLE+inodeIndex*16+0] = DATA;
+			[INODE_TABLE+inodeIndex*16+1] = fileName;
+			[INODE_TABLE+inodeIndex*16+2]	= 0;
+			[INODE_TABLE+inodeIndex*16+3] = [currProcessTable + 3];
+			[INODE_TABLE+inodeIndex*16+4] = permission;
+			
+			[INODE_TABLE+inodeIndex*16+8] =-1;
+			[INODE_TABLE+inodeIndex*16+9] =-1;
+			[INODE_TABLE+inodeIndex*16+10]=-1;
+			[INODE_TABLE+inodeIndex*16+11]=-1;
+			
+			alias uname R8;
+			uname = [USER_TABLE + [currProcessTable + 3]*2 + 0 ];
+
+			[ROOT_FILE+inodeIndex*8+0] = fileName;
+			[ROOT_FILE+inodeIndex*8+1] = 0;
+			[ROOT_FILE+inodeIndex*8+2] = DATA;
+			[ROOT_FILE+inodeIndex*8+3] = uname;
+			[ROOT_FILE+inodeIndex*8+4] = permission;
+			
+			break;
+				
+		endif;
+		inodeIndex = inodeIndex+1;
+	
+	endwhile;
+	
+	if(inodeIndex==MAX_FILE_NUM) then
+		
+		[returnAddr] = -1; 
+		
+	else
+		
+		[returnAddr] = 0;
+	endif; 
+	
+endif;
+
+//Delete sys call
+if(sysNum==4) then 
+	
+	//change the mode 
+	[currProcessTable + 9] = 4;
+	
+	//1. Get inode index for the file to be deleted
+	alias inodeIndex R5;
+	alias fileName R6;
+	
+	fileName = [ [ PTBR + 2*( (userSP-4)/512 ) ]*512 + (userSP-4)%512  ]; 
+	
+	inodeIndex=0;
+	while( inodeIndex < MAX_FILE_NUM) do
+
+		if( [INODE_TABLE +inodeIndex*16 + 1]==fileName)	then
+					
+			break;
+	
+		endif;
+		inodeIndex = inodeIndex+1;
+	endwhile;
+	
+	//If file is present
+	
+	if(inodeIndex!=MAX_FILE_NUM) then
+	
+		//if file is data file
+		if([INODE_TABLE + inodeIndex*16 + 0]==DATA) then
+			
+			//2. Check if exlcusive permission is set for the file
+			R7 = [currProcessTable + 3 ];
+			//If so reject if the user is not root or the ID does not match
+			
+			if([INODE_TABLE +inodeIndex*16 + 4]==EXCLUSIVE &&  R7!=1 && R7!=[ INODE_TABLE +inodeIndex*16 + 3] ) then
+				
+				[returnAddr] = -1;
+				//Reset mode
+				[currProcessTable + 9] = 0;
+
+				//Switch stk
+				SP = [currProcessTable + 13];
+				ireturn;
+				
+			else		
+
+				//3. Acquire a lock over the file
+				backup;
+				
+				R3 = currentPID;
+				R1 = 4;
+				R2 = inodeIndex;
+			
+				
+				call RESOURCE_MANAGER;
+				
+				if(R0==-1) then
+					restore;
+					[returnAddr] = -1;
+					//Reset mode
+					[currProcessTable + 9] = 0;
+
+					//Switch stk
+					SP = [currProcessTable + 13];
+					ireturn;
+							
+				endif;
+				
+				restore;
+
+				//4.Check if any process has opened this file
+				if([FILE_STATUS_TABLE + inodeIndex*4 + 1 ]!=-1) then
+				
+				
+					//Calling release Inode
+					backup;
+					
+					R1 = 5;
+					R2 = inodeIndex;
+					R3 = currentPID;
+					
+					call RESOURCE_MANAGER;
+					
+					restore;
+					
+					[returnAddr] = -2;
+					//Reset mode
+					[currProcessTable + 9] = 0;
+
+					//Switch stk
+					SP = [currProcessTable + 13];
+					ireturn;
+							
+				endif;
+				
+				
+				//5.For each disk block if there is a match in buffer table , reset dirty bit
+				
+				R7 = 0;
+				while(R7<4) do
+					
+					alias diskBlockNum R8;
+					diskBlockNum = [INODE_TABLE+inodeIndex*16 + R7 + 8];
+					if( diskBlockNum == [BUFFER_TABLE + diskBlockNum%4 + 0] ) then
+					
+						[BUFFER_TABLE + diskBlockNum%4 + 1] = 0; 
+						[BUFFER_TABLE + diskBlockNum%4 + 1] = -1;  
+					
+					endif;
+					
+					backup;
+					
+					// call release block
+					
+					R1 = 4;
+					R2 = [INODE_TABLE+inodeIndex*16 + R7 + 8];
+					R3 = currentPID;
+					call MEMORY_MANAGER;
+					
+					restore;
+					R7 = R7+1;
+				
+				endwhile;
+				
+			
+				//6.Update inode and root table
+				R7 =0;
+				while(R7<16) do
+					[INODE_TABLE + inodeIndex*16 + R7]=-1;				
+					R7 = R7+1;
+				endwhile;
+				[INODE_TABLE + inodeIndex*16 + 2]=0;
+
+				R7 =0;
+				while(R7<8) do
+					[ROOT_FILE + inodeIndex*8 + R7] =-1;				
+					R7 = R7+1;
+				endwhile;
+				[ROOT_FILE + inodeIndex*8 + 1] =0;
+				
+				//7.call releaseInode
+				backup;
+				
+				R3 = currentPID;	
+				R1 = 5;
+				R2 = inodeIndex;
+				
+					
+				call RESOURCE_MANAGER;
+					
+				restore;
+				[returnAddr] = 0;
+			 	
+			endif;
+			
+		else
+			//File is not data file
+			[returnAddr] = -1;
+		
+		endif;	
+			
+	else
+	//File is not present in inode Table
+	[returnAddr] = 0;
+	endif;
+
+endif;
+
+//Reset mode
+[currProcessTable + 9] = 0;
+
+//Switch stk
+SP = [currProcessTable + 13];
+ireturn;

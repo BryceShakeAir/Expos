@@ -1,0 +1,42 @@
+int main()
+{
+	decl
+		int temp;
+		string command;
+	enddecl
+
+	begin
+		command = "even.xsm";
+		while(1==1) do
+			
+			temp = exposcall("Read",-1,command);
+			
+			if(command=="Shutdown") then
+			
+				temp = exposcall("Shutdown");
+			
+			else
+				temp = exposcall("Fork");
+				
+				if(temp==0) then
+					
+					temp = exposcall("Exec",command);
+					
+					if(temp==-1) then
+						temp = exposcall("Write",-2,"Bad Command");
+					endif;
+					
+					break;
+					
+				else
+				
+					temp = exposcall("Wait",temp);
+				
+				endif;
+			
+			endif;
+
+		endwhile;
+		return 0;
+	end
+}

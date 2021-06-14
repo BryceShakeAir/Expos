@@ -1,0 +1,68 @@
+//PID OF current instruction
+alias currPID R0;
+currPID = [SYSTEM_STATUS_TABLE + 1];
+
+//Pushing BP
+//BP = SP;
+multipush (BP);
+
+//Process Table entry of current process
+alias currProcessTable R1;
+currProcessTable = PROCESS_TABLE + 16*currPID;
+[currProcessTable + 12] = SP%512;
+[currProcessTable + 14] = PTBR;
+[currProcessTable + 15] = PTLR;
+
+alias newPID R2;
+newPID = 0;
+
+//5th point
+currPID = currPID+1;
+while( currPID<16 ) do
+	
+	if( [PROCESS_TABLE + 16*currPID + 4]!="TERMINATED" ) then
+		
+		newPID = currPID;
+		break;		
+	endif;
+	currPID = currPID+1;
+	
+endwhile;
+//NO such Process which is ready
+
+//Updating SP of new Process
+//Finding new ProcessTable
+
+alias newProcessTable R3;
+newProcessTable = PROCESS_TABLE + 16*newPID;
+
+SP = [newProcessTable + 11]*512 + [newProcessTable + 12];
+//Updating PTBR AND PTLR
+PTBR = [newProcessTable + 14];
+PTLR = [newProcessTable + 15]; 
+
+//Updating System Status Table
+[SYSTEM_STATUS_TABLE + 1] = newPID;
+breakpoint;
+
+//is Process Created
+//print [newProcessTable + 4];
+if([newProcessTable + 4]=="CREATED") then
+
+	breakpoint;
+	SP = [newProcessTable+13];
+	[newProcessTable + 4]= "RUNNING";
+	[newProcessTable + 9]= 0;
+	ireturn;
+	
+endif;
+
+[newProcessTable + 4]= "RUNNING";
+//Restore BP
+multipop (BP);
+return;
+
+
+
+
+

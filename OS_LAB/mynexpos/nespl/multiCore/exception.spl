@@ -1,0 +1,203 @@
+//Switch stk
+[ PROCESS_TABLE +[SYSTEM_STATUS_TABLE + CORE*5 + 1 ]*16 + 13 ] = SP;
+SP = [ PROCESS_TABLE +[SYSTEM_STATUS_TABLE + CORE*5 +1 ]*16 + 11 ]*512 - 1;
+
+//Bckup
+backup;
+
+//Acquire_kernel_lock
+R1 = 1;
+call ACCESS_CONTROL;
+
+//Pushing EIP 
+multipush(EIP);
+
+//Set mode to -1;
+alias currentPID R0;
+alias currentProcessTable R1;
+
+currentPID = [SYSTEM_STATUS_TABLE + CORE*5 +1];
+currentProcessTable  = PROCESS_TABLE +currentPID*16;
+
+[currentProcessTable + 9] = -1;
+
+//If exception is not caused due to page fault or if userStk is full
+alias userSP R2;
+userSP = [ PROCESS_TABLE +[SYSTEM_STATUS_TABLE + CORE*5 + 1 ]*16 + 13 ]; 
+if( (userSP == PTLR*512-1) || ( EC!=0 ) ) then
+	breakpoint;
+	//Printing the message
+		
+
+	alias message1 R5;
+	alias message2 R4;
+	
+	if(EC==1) then
+		
+		message1 = "Illegal ";
+		message2 = "Instruction";	
+
+	endif;
+	
+	if(EC==2) then
+
+		message1 = "Illegal Memory";	
+		message2 = "Access";			
+	endif;
+
+	if(EC==3) then
+	
+		message1 = "Arithmetic";			
+		message2= "Exception";
+	endif;
+	
+	if(userSP==PTLR*512-1) then
+
+		message1 = "Full";
+		message2 = "Stack";
+
+	endif;		
+
+	//Call write term
+	multipush(R0,R1,R2,R3,R4,R5,EC,EMA,EPN,EIP);		
+	
+	R3 = message1;	
+	R2 = currentPID;
+	R1 = 3;
+	
+	call DEVICE_MANAGER;
+	
+	multipop(R0,R1,R2,R3,R4,R5,EC,EMA,EPN,EIP);
+	
+	multipush(R0,R1,R2,R3,R4,R5,EC,EMA,EPN,EIP);
+	R3 = message2;	
+	R2 = currentPID;
+	R1 = 3;
+
+	call DEVICE_MANAGER;
+
+	multipop(R0,R1,R2,R3,R4,R5,EC,EMA,EPN,EIP);
+
+	//Call exit_process
+
+	multipush(R0,R1,R2,EC,EMA,EPN,EIP);
+
+	R1 = 3;
+	R2 = currentPID;
+
+	call PROCESS_MANAGER;
+	
+	multipop(R0,R1,R2,EC,EMA,EPN,EIP);
+
+	//call context_switch
+	
+	backup;
+	
+	//releasing kernel lock
+	R1 = 4;
+	R2 = KERN_LOCK;
+	call ACCESS_CONTROL;
+
+	call CONTEXT_SWITCH;	
+	
+	//acquiring kernel lock
+	R1 = 1;
+	call ACCESS_CONTROL;
+
+	restore;
+
+endif;
+
+//if the cause is Page Fault
+if(EC==0) then
+
+	//If fault is in codepage
+	if(EPN>3&&EPN<8) then
+		
+		//Use blocknum from DMT
+			
+		alias blocknum R3;
+		blocknum =[DISK_MAP_TABLE + currentPID*10 + EPN];
+				
+		//GET_CODE_PAGE
+		
+		alias codePage R4;
+
+		multipush(R0,R1,R2,R3,EC,EMA,EPN,EIP);
+		
+		R1 = 5;
+		R2 = blocknum;
+		R3 = currentPID;
+
+		call MEMORY_MANAGER;			
+	
+		codePage = R0;
+		
+		multipop(R0,R1,R2,R3,EC,EMA,EPN,EIP);
+		
+		//Update PageTable
+		
+		[PTBR + 2*EPN] = codePage;
+		[PTBR + 2*EPN + 1] = "1100";
+		 
+	
+	endif;
+	
+	//If fault is in heap page
+	if(EPN==2||EPN==3) then 	
+
+		//2 * Get Free Page
+		alias heap1 R3;
+		alias heap2 R4;
+		
+		multipush(R0,R1,R2,EC,EMA,EPN,EIP);		
+			
+		R1 = 1;		
+		call MEMORY_MANAGER;		
+				
+		heap1 = R0;		
+				
+		multipop(R0,R1,R2,EC,EMA,EPN,EIP);
+		
+		multipush(R0,R1,R2,R3,EC,EMA,EPN,EIP);		
+		
+		R1 = 1;				
+		call MEMORY_MANAGER;		
+				
+		heap2 = R0;		
+				
+		multipop(R0,R1,R2,R3,EC,EMA,EPN,EIP);
+		
+		//Update PageTable
+			
+		[PTBR + 4] = heap1;
+		[PTBR + 5] = "1110";
+		[PTBR + 6] = heap2;
+		[PTBR + 7] = "1110";
+		
+	endif;	
+
+
+
+	//Set mode to 0
+	[currentProcessTable + 9] = 0;
+
+	//Poping EIP
+	multipop(EIP);
+	
+	//releasing kernel lock
+	R1 = 4;
+	R2 = KERN_LOCK;
+	call ACCESS_CONTROL;
+	
+	//restore
+	restore;
+	//Switch stk
+	SP = [ PROCESS_TABLE +[SYSTEM_STATUS_TABLE + CORE*5 +1 ]*16 + 13 ] + 1;
+
+	//Storing EIP on top of stk
+
+	[[PTBR + 2*(SP/512)]*512 + SP%512] = EIP;	
+	
+	ireturn;
+endif;

@@ -1,0 +1,191 @@
+//Load lib
+loadi(63,13);
+loadi(64,14);
+
+//Load stack
+//Load heap
+
+//load init code
+loadi(65,7);
+loadi(66,8);
+
+
+//loading exceptions
+loadi(22,35);
+loadi(23,36);
+loadi(2,15);
+loadi(3,16);
+//loading timer
+loadi(4, 17);
+loadi(5, 18);
+
+//Loading scheduler
+loadi(50,63);
+loadi(51,64);
+
+//Loading Resource Manager
+loadi(40,53);
+loadi(41,54);
+
+//Loading Device Manager
+loadi(48,61);
+loadi(49,62);
+
+//Load processManager
+loadi(42,55);
+loadi(43,56);
+
+//Load MemoryManager
+loadi(44,57);
+loadi(45,58);
+
+//load console Interrupt Handler
+loadi(8,21);
+loadi(9,22);
+
+//Load int6
+loadi(14,27);
+loadi(15,28);
+//loading int7
+loadi(16,29);
+loadi(17,30);
+//loading int8
+loadi(18,31);
+loadi(19,32);
+//Load int9;
+loadi( 20,33);
+loadi( 21,34);
+
+//load inode
+loadi(59,3);
+loadi(60,4);
+
+//Load disk interrupt handler
+loadi(6,19);
+loadi(7,20);
+
+//Load DFL
+loadi(61,2);
+
+
+//Initialize disk status table
+[DISK_STATUS_TABLE + 0]= 0;
+
+//Initialize MEM_FREE_LIST
+alias index R1;
+index =0;
+while(index<76) do
+
+	[MEMORY_FREE_LIST + index] = 1;
+	index  = index + 1;
+
+endwhile;
+while(index<128) do
+
+	[MEMORY_FREE_LIST + index] = 0;
+	index = index + 1;
+endwhile;
+
+//Initailizing MEM_FREE_COUNT
+[SYSTEM_STATUS_TABLE + 2] = 52;
+
+//Stack and UAP of idle
+[SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] -2;
+[MEMORY_FREE_LIST + 82] = [MEMORY_FREE_LIST + 82] + 1;
+[MEMORY_FREE_LIST + 81] = [MEMORY_FREE_LIST + 81] + 1;
+
+//Initializing TERMINAL STATUS TABLE
+
+[TERMINAL_STATUS_TABLE + 0] = 0;
+
+//PTBR PTLR
+
+PTBR = PAGE_TABLE_BASE +20;
+PTLR = 10;
+
+//Setting up Page Table
+
+[PTBR+0] = 63;
+[PTBR+1] = "0100";
+
+[PTBR+2] = 64;
+[PTBR+3] = "0100";
+
+[PTBR+4] = 78;
+[PTBR+5] = "0110";
+[PTBR+6] = 79;
+[PTBR+7] = "0110";
+
+[MEMORY_FREE_LIST + 78]  = 1;
+[MEMORY_FREE_LIST + 79]  = 1;
+[SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] -2;
+
+[PTBR+8] = 65;
+[PTBR+9] = "0110";
+[PTBR+10] = 66;
+[PTBR+11] = "0110";
+[PTBR+12] = -1;
+[PTBR+13] = "0000";
+[PTBR+14] = -1;
+[PTBR+15] = "0000";
+
+[PTBR+16] = 76;
+[PTBR+17] = "0110";
+[PTBR+18] = 77;
+[PTBR+19] = "0110";
+
+[MEMORY_FREE_LIST + 76]  = 1;
+[MEMORY_FREE_LIST + 77]  = 1;
+[SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] -2;
+
+//MAKING PROCESS TABLE
+[PROCESS_TABLE + 16 + 11] = 80;
+[PROCESS_TABLE + 16 + 1] = 1;
+[PROCESS_TABLE + 16 + 4] = "CREATED";
+[PROCESS_TABLE + 16 + 12] = 0;
+[PROCESS_TABLE + 16 + 13] = 8*512;
+[PROCESS_TABLE + 16 + 14] = PAGE_TABLE_BASE+20;
+[PROCESS_TABLE + 16 + 15] = 10;
+
+[MEMORY_FREE_LIST + 80]  = 1;
+[SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] -1;
+
+//Initialize DISK MAP TABLE for INIT
+
+R9= 0;
+while(R9<10) do
+
+	[DISK_MAP_TABLE + 10 + R9] = -1;
+	R9 = R9+1;
+endwhile;
+//Setting the code block number in DMT 
+[DISK_MAP_TABLE + 10 + 4 ] = 7;
+[DISK_MAP_TABLE + 10 + 5 ] = 8;
+
+
+//Setting ResourceTable
+
+alias reqProcessTable R9;
+reqProcessTable = PROCESS_TABLE + 16;
+alias ResourceTableEntry R10;
+
+ResourceTableEntry = ([reqProcessTable + 11]+1)*512 -20;
+while(ResourceTableEntry < ([reqProcessTable + 11]+1)*512 ) do
+	[ResourceTableEntry ] = -1;
+	ResourceTableEntry = ResourceTableEntry +1;
+endwhile;
+
+
+//Entry point
+[76*512] = [65*512 + 1];
+
+//Marking all other process as terminated;
+R12 = 2;
+while(R12<16) do
+	
+	[PROCESS_TABLE + R12*16 + 4] = "TERMINATED";
+	R12 = R12 + 1;
+	
+endwhile;
+
+return;

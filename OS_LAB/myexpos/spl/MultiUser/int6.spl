@@ -1,0 +1,262 @@
+
+alias currPID R0;
+currPID = [SYSTEM_STATUS_TABLE + 1];
+
+alias currProcessTable R1;
+alias currPageTable R8;
+currProcessTable = PROCESS_TABLE + currPID*16;
+currPageTable = PAGE_TABLE_BASE +  currPID*20;
+//1. setting the mode
+[ currProcessTable +  9 ] = 7;
+
+alias userSP R2;
+userSP = SP;
+
+//2. Switch stack;
+[currProcessTable + 13 ] = SP;
+SP =  [currProcessTable + 11 ]*512 - 1;
+
+//3.Transfer control to code
+//Check if file desc is -1;
+
+alias fileDesc R3;
+alias fileDescAddr R4;
+alias fileDescOffset R5; 
+
+fileDescAddr = (userSP-4)/512;
+fileDescOffset = (userSP - 4)%512;
+fileDescAddr = [currPageTable + 2*fileDescAddr]*512 + fileDescOffset; 
+
+fileDesc = [fileDescAddr];
+
+alias returnAddr R6;
+alias returnOffset R7;
+
+returnOffset = (userSP-1)%512;
+returnAddr = (userSP - 1)/512;
+returnAddr = [ currPageTable + 2*returnAddr ]*512 + returnOffset; 
+
+
+//If input is to be read from terminal
+if(fileDesc==-1) then
+	
+	//Call Terminal Read
+	backup;
+	
+	//Storing the address of the word
+	R12 = (userSP-3)%512;
+	R13 = (userSP - 3)/512;
+	R3 = [ currPageTable + 2*R13 ]*512 + R12 ; 
+	R3 = [R3]; 
+
+	//Current Pid
+	R2 = currPID;
+	
+	//Function number of Terminal Read
+	R1 = 4;
+	
+	
+	call DEVICE_MANAGER;
+	
+	restore;
+	//Storing return value
+	[returnAddr] = 0;	
+	
+			
+else
+	//R5 R7
+	//1.Find the required entry in Resource Table
+	
+	//checking validity of fileDesc
+	if(fileDesc<0||fileDesc>7) then	
+
+		[returnAddr] = -1;
+		//Reseting Mode
+		[ currProcessTable +  9 ] = 0;
+
+		//Switching STK;
+		SP = [currProcessTable + 13];
+
+		ireturn;
+	
+	endif;
+	
+	//Locating perProcess Resource Table
+	alias resTableBase R5;
+	resTableBase =[currProcessTable + 11]*512 + RESOURCE_TABLE_OFFSET;
+	
+	//Checking resource identifier field of ResTable
+	
+	if([resTableBase + 2*fileDesc +0]!=FILE) then
+		
+		[returnAddr] = -1;
+		//Reseting Mode
+		[ currProcessTable +  9 ] = 0;
+
+		//Switching STK;
+		SP = [currProcessTable + 13];
+
+		ireturn;
+	
+	endif;
+	
+	
+	alias OFTindex R7;
+	OFTindex = [resTableBase + 2*fileDesc +1];
+	
+	alias inodeIndex R9;
+	inodeIndex = [OPEN_FILE_TABLE + OFTindex*4 + 0];
+	
+	alias LseekAddr R10;
+	LseekAddr = OPEN_FILE_TABLE + OFTindex*4 + 2;
+	
+	//2.Lock the inode by Acquire inode
+
+	multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+
+	R1 = 4;
+	R2 = inodeIndex;
+	R3 = currPID;
+	
+	call RESOURCE_MANAGER;
+	
+	if(R0==-1) then
+
+		multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+		[returnAddr] = -1;
+		//Reseting Mode
+		[ currProcessTable +  9 ] = 0;
+
+		//Switching STK;
+		SP = [currProcessTable + 13];
+
+		ireturn;
+	
+	endif;
+	multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);	
+	
+	
+	//3.Convert Logical Addr of mem buff to Physical Addr
+	alias phyAddrMem R11;
+	alias logicalAddr R14;
+	R12 = (userSP-3)%512;
+	R13 = (userSP - 3)/512;
+	logicalAddr = [ currPageTable + 2*R13 ]*512 + R12 ; 
+	logicalAddr = [logicalAddr]; 
+	R12 = logicalAddr%512;
+	R13 = logicalAddr/512;
+	phyAddrMem = [ currPageTable + 2*R13 ]*512 + R12;
+ 
+	//4.If file is root
+	if( [OPEN_FILE_TABLE + OFTindex*4 + 0]==INODE_ROOT  ) then
+	
+		//a.Check if Lseek has reached end of file
+		if( [LseekAddr] == 480) then
+	
+			//b.if so releaseInode and return
+			
+			multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11);
+			
+			R1 = 5;
+			R2 = inodeIndex;
+			R3 = currPID;
+			
+			call RESOURCE_MANAGER;
+			
+			multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11);
+			
+			[returnAddr] = -2;
+				
+			//Reseting Mode
+			[ currProcessTable +  9 ] = 0;
+
+			//Switching STK;
+			SP = [currProcessTable + 13];
+
+			ireturn;
+		endif;
+		
+		//c.Read the word at root file pointed by lseek to mem buff
+		[phyAddrMem] = [ROOT_FILE + [LseekAddr] ]; 
+		
+		//d.Lseek++;
+		
+		[LseekAddr] = [LseekAddr] +1;
+	
+	//5.else 
+	else
+		
+		//a.Check if Lseek has reached end of file
+		if( [LseekAddr] == [INODE_TABLE + inodeIndex*16 +2]) then
+			
+			//b.if so releaseInode and return
+			
+			multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11);
+			
+			R1 = 5;
+			R2 = inodeIndex;
+			R3 = currPID;
+			
+			call RESOURCE_MANAGER;
+			
+			multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11);
+			
+			[returnAddr] = -2;
+				
+			//Reseting Mode
+			[ currProcessTable +  9 ] = 0;
+
+			//Switching STK;
+			SP = [currProcessTable + 13];
+
+			ireturn;
+		endif;
+		
+		//c. call Buffer_read();
+		
+		multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11);
+		
+		alias blockNum R12;
+		R13 = [LseekAddr]/512;
+		blockNum = [INODE_TABLE + inodeIndex*16 + 8 + R13];
+		
+		R1 = 2;
+		R2 = blockNum;
+		R3 = [LseekAddr]%512;
+		R4 = phyAddrMem;
+		
+		call FILE_MANAGER;
+		
+		multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11);
+		
+		//d.Lseek++;
+		
+		[LseekAddr] = [LseekAddr] +1;
+		
+	endif;	
+	//6.Release_inode	
+
+	multipush(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11);
+			
+	R1 = 5;
+	R2 = inodeIndex;
+	R3 = currPID;
+			
+	call RESOURCE_MANAGER;
+			
+	multipop(R0,R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11);
+
+	[returnAddr] = 0; 
+
+endif;
+
+//Reseting Mode
+[ currProcessTable +  9 ] = 0;
+
+//Switching STK;
+SP = [currProcessTable + 13];
+
+ireturn;
+
+
+

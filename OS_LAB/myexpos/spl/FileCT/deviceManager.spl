@@ -1,0 +1,151 @@
+alias functionNum R1;
+alias currentPID R2;
+
+//DiskStore
+if(functionNum==1) then
+
+	alias reqPID R2;
+	alias pageNum R3;
+	alias blockNum R4;
+
+	//1.Acquire the disk
+	backup;
+	
+	R1 = 3;
+	R2 = reqPID ;
+	
+	call RESOURCE_MANAGER;
+	
+	restore;
+
+	//2. set entries in disk status table
+	[DISK_STATUS_TABLE + 1] = 1;
+	[DISK_STATUS_TABLE + 2] = pageNum;
+	[DISK_STATUS_TABLE + 3] = blockNum;
+	
+
+	//3.store the page to disk
+	store(pageNum,blockNum);
+	
+	//4. change state and switch context
+	[PROCESS_TABLE + reqPID*16 + 4] ="WAIT_DISK";
+	backup;	
+	call CONTEXT_SWITCH;
+	restore;
+endif;
+
+//Check if funcNum is DiskLoad
+if(functionNum==2) then
+
+	alias pageNum R3;
+	alias blockNum R4;
+	
+	//Acquire disk
+	multipush(R1,R2,R3,R4);
+
+	R1 = 3 ;
+	R2 = currentPID;
+	
+	call RESOURCE_MANAGER;	
+	
+	multipop(R1,R2,R3,R4);
+
+	//Set Disk Status Table
+	
+	//Load/Store bit
+	[DISK_STATUS_TABLE + 1] = 0;
+	//Page Number	
+	[DISK_STATUS_TABLE + 2] = pageNum;
+	//block number	
+	[DISK_STATUS_TABLE + 3] = blockNum;
+
+	//Load
+	load(pageNum,blockNum);
+	
+	//change state
+	alias currentProcessTable R5;
+	currentProcessTable = PROCESS_TABLE + currentPID*16; 	
+	[currentProcessTable + 4] = "WAIT_DISK";
+
+	//switch context;
+
+	backup;
+
+	call CONTEXT_SWITCH;
+	
+	restore;
+
+endif;
+
+
+//Check if funcNum is TermWrite
+if(functionNum==3) then
+
+	multipush(R1,R2,R3);
+	//acquire terminal
+	R1 = 8;
+	R2 = currentPID;
+	
+	call MOD_0;
+
+	multipop(R1,R2,R3);
+	
+	print R3;
+	
+	multipush(R1,R2,R3);
+	
+	// release terminal
+	R1 = 9;
+	R2 = [SYSTEM_STATUS_TABLE + 1];
+	call MOD_0;
+
+	multipop(R1,R2,R3);
+endif;
+//Calling termRead
+if( functionNum==4 ) then
+	
+	// Call Acquire TerminaL
+	
+	multipush(R1,R2,R3);
+	
+	R1 = 8; 
+	R2 = currentPID;	
+
+	call MOD_0;
+
+	multipop (R1,R2,R3);
+
+	//reading the input to port P0
+	read;
+	
+	//Setting the status of currentProcess Table to Wait 	
+	[ PROCESS_TABLE + currentPID*16 + 4 ] = "WAIT_TERMINAL";
+
+	multipush(R1,R2,R3);
+	
+	//Invoking a scheduler
+		
+	call CONTEXT_SWITCH;
+	
+	multipop(R1,R2,R3);
+	//Getting the physical address of the word;	
+	alias wordLogicalAddr R3;
+	
+	alias wordOffset R4;
+	alias wordPageNum R5;
+	alias wordPhysicalAddr R6;
+	alias currPageTable R7;
+	
+	currPageTable = [ PROCESS_TABLE + currentPID*16 + 14 ];
+	wordOffset = wordLogicalAddr%512;
+	wordPageNum = [currPageTable + 2*(wordLogicalAddr/512) ];
+	wordPhysicalAddr = wordPageNum*512 + wordOffset;
+	//Setting the value in buffer field to physial addr of the word
+
+	R8= [ PROCESS_TABLE + currentPID*16 + 8 ];	
+	R9 = [ wordPhysicalAddr ];	
+	
+	[ wordPhysicalAddr]  = R8;
+endif;
+
+return;

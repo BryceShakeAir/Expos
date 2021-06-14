@@ -1,0 +1,158 @@
+alias userSP R0;
+userSP = SP;
+alias currentPID R1;
+currentPID = [SYSTEM_STATUS_TABLE+CORE*5 +1];
+alias currProcessTable R2;
+currProcessTable = PROCESS_TABLE + currentPID*16;
+
+//Switch stk;
+[currProcessTable + 13] = SP;
+SP = [currProcessTable + 11]*512 -1;
+
+//Acquire_kernel_lock
+multipush(R0,R1,R2);
+R1 = 1;
+call ACCESS_CONTROL;
+multipop(R0,R1,R2);
+
+//Extracting sys call num
+alias sysNum R3;
+sysNum = [ [ PTBR + 2*( (userSP-5)/512 ) ]*512 + (userSP-5)%512  ]; 
+
+alias returnAddr R4;
+returnAddr = [ PTBR + 2*( (userSP-1)/512 ) ]*512 + (userSP-1)%512;
+
+//SEM LOCK SYS CALL
+if(sysNum==19) then
+	
+	[currProcessTable + 9] = 19;
+	//Extracting the arguments
+	alias semDesc R5;
+	semDesc = [ [ PTBR + 2*( (userSP-4)/512 ) ]*512 + (userSP-4)%512  ];
+	
+	if( (semDesc<0 || semDesc>7) || [ [currProcessTable + 11]*512 + RESOURCE_TABLE_OFFSET + 2*semDesc ]!=SEMAPHORE ) then
+	
+		[returnAddr] = -1;
+	
+	else
+		//If the semaphore is already locked
+		alias semID R6;
+		semID = [ [currProcessTable + 11]*512 + RESOURCE_TABLE_OFFSET + 2*semDesc + 1 ];
+		
+		
+		while(  [ SEMAPHORE_TABLE + semID*4 + 0]!=-1 ) do
+
+			[currProcessTable + 4] = "WAIT_SEM";
+			[currProcessTable + 5] = semID;
+				
+			multipush(R0,R1,R2,R3,R4,R5,R6);
+				
+			//releasing kernel lock
+			
+			R1 = 4;
+			R2 = KERN_LOCK;
+			call ACCESS_CONTROL;
+
+			call CONTEXT_SWITCH;
+			
+			//Acquire_kernel_lock
+			R1 = 1;
+			call ACCESS_CONTROL;
+	
+			multipop(R0,R1,R2,R3,R4,R5,R6);
+				
+		endwhile;
+		//Lock the Semaphore table with the currentPID
+		
+		[ SEMAPHORE_TABLE + semID*4 + 0] = currentPID;
+		
+		[returnAddr] = 0;
+		
+	endif;
+ 
+	
+
+endif;
+
+//SEM UNLOCK SYS CALL
+if(sysNum==20) then
+	
+	
+	[currProcessTable + 9] = 20;
+	alias semDesc R6;
+	semDesc= [ [ PTBR + 2*( (userSP-4)/512 ) ]*512 + (userSP-4)%512  ];
+	//Checking if semDesc is valid
+	if(semDesc<0||semDesc>7|| [ [currProcessTable + 11]*512 + RESOURCE_TABLE_OFFSET + 2*semDesc ]!=SEMAPHORE ) then
+	
+		
+		[returnAddr] = -1;
+	
+	else
+		alias semID R7;
+		semID = [ [currProcessTable + 11]*512 + RESOURCE_TABLE_OFFSET + 2*semDesc + 1 ];
+			
+		//If the corresponding entry in Semaphore Table is locked
+		if([SEMAPHORE_TABLE + semID*4 + 0]!=-1 ) then
+		
+			if(currentPID != [SEMAPHORE_TABLE + semID*4 + 0]) then
+				
+				[returnAddr] = -2;	
+				//Reset mode
+				[currProcessTable + 9] = 0;
+
+				//releasing kernel lock
+				multipush(R2);
+
+				R1 = 4;
+				R2 = KERN_LOCK;
+				call ACCESS_CONTROL;
+
+				multipop(R2);
+
+				//Switch stk
+				SP = [currProcessTable + 13];
+
+				ireturn;	
+			
+			else
+				
+				//Clearing the semaphore table
+				[SEMAPHORE_TABLE + semID*4 + 0] =-1;
+				
+				//Waking up all process waiting for the semaphore
+				R8 = 0;
+				while(R8<16) do
+				
+					if( [PROCESS_TABLE +R8*16+ 4]=="WAIT_SEM"&& [PROCESS_TABLE +R8*16+ 5]==semID  ) then
+						
+						[PROCESS_TABLE +R8*16 + 4] = "READY";
+					endif;
+					R8 = R8 + 1;
+				endwhile;
+					
+			
+			endif;
+		
+		endif;
+		
+		[returnAddr] = 0;
+		
+	endif;
+
+endif;
+
+//Reset mode
+[currProcessTable + 9] = 0;
+//releasing kernel lock
+multipush(R2);
+
+R1 = 4;
+R2 = KERN_LOCK;
+call ACCESS_CONTROL;
+
+multipop(R2);
+//Switch stk
+SP = [currProcessTable + 13];
+
+ireturn;
+

@@ -1,0 +1,243 @@
+alias functionNum R1;
+
+//Buffer Read
+if(functionNum==2) then
+
+	alias diskBlockNum R2;
+	alias Offset R3;
+	alias memAddr R4;
+	breakpoint;
+	//1.Identify the bufferpage
+
+	alias bufferNum R5;
+	bufferNum = diskBlockNum%4;
+
+	//2.Call AcquireBuffer
+	
+	multipush(R1,R2,R3,R4,R5);
+
+	R1 = 1;
+	R2 = bufferNum;
+	R3 = [SYSTEM_STATUS_TABLE + 1];
+
+	call RESOURCE_MANAGER;
+
+	multipop(R1,R2,R3,R4,R5);
+
+	//3.Check if the right disk is present
+
+	if( [BUFFER_TABLE + bufferNum*4 + 0]!=diskBlockNum ) then
+
+		//4.Check if it is dirty and not empty
+		
+		if( [BUFFER_TABLE + bufferNum*4 + 1]==1&& [BUFFER_TABLE + bufferNum*4 + 0]!=-1 ) then
+		
+			//5.Call Disk store
+			
+			multipush(R1,R2,R3,R4,R5);
+		
+			R1 = 1;
+			R2 = [SYSTEM_STATUS_TABLE+1];
+			//Buffer Cache
+			R3 = 71 + bufferNum; 
+			R4 = [BUFFER_TABLE + bufferNum*4 + 0];
+			
+			call DEVICE_MANAGER;
+	
+			multipop(R1,R2,R3,R4,R5);
+			
+			//6.Clean *it up
+			
+			[BUFFER_TABLE + bufferNum*4 + 1] = 0;
+			
+			
+		endif;	
+		
+		//7.Call disk Load to load the appropriate disk
+			
+		alias bufferPage R6;
+		bufferPage = 71 + bufferNum; 
+		
+		multipush(R1,R2,R3,R4,R5,R6);
+			
+		R4 = diskBlockNum;
+		R1 = 2;
+		R2 = [SYSTEM_STATUS_TABLE+1];
+		//Buffer Cache
+		R3 = bufferPage;
+			
+		call DEVICE_MANAGER;
+		multipop(R1,R2,R3,R4,R5,R6);
+			
+		//8.Change the contents of buffer table
+		
+		[BUFFER_TABLE + bufferNum*4 + 0] = diskBlockNum;
+			
+	endif;	
+	
+		
+	//9.Read from disk to mem addr
+	alias bufferPage R6;
+	bufferPage = 71 + bufferNum; 
+
+	R7 = [ bufferPage*512 + Offset ];	
+	R8 = [memAddr];
+	breakpoint;	
+	[memAddr] = [ bufferPage*512 + Offset ];	
+	
+	
+	//10.Call ReleaseBuffer
+	multipush(R1,R2,R3,R4,R5,R6);
+	
+	R1  = 2;
+	R2 = bufferNum;
+	R3 = [SYSTEM_STATUS_TABLE + 1];
+	
+	call RESOURCE_MANAGER;
+	
+	multipop(R1,R2,R3,R4,R5,R6);
+
+	R0 = 0;
+
+endif;
+
+//OPEN file
+if(functionNum==3) then
+
+	alias inodeIndex R3;
+	alias fileName R2;
+	inodeIndex=0;
+	while(inodeIndex<MAX_FILE_NUM) do
+	
+		if([INODE_TABLE+inodeIndex*16 + 1]==fileName) then
+			break;	
+		endif;
+		inodeIndex = inodeIndex+1;
+	
+	endwhile;
+	
+	if(inodeIndex==MAX_FILE_NUM) then
+		breakpoint;
+		R0 = -1;
+		return;
+	
+	endif;
+	
+	//If file is of type exec, return -1;
+	if( [INODE_TABLE+inodeIndex*16 + 0]==EXEC ) then
+	
+		R0=-1;
+		return;
+		
+	endif;
+	
+	//1.Lock the file with AcquireInode  
+	multipush(R1,R2,R3);
+	
+	
+	R1 = 4;
+	R2 = inodeIndex;
+	R3 = [SYSTEM_STATUS_TABLE+1];
+	
+	call RESOURCE_MANAGER;
+	
+	if(R0==-1) then
+	
+		R0 = -1;
+		multipop(R1,R2,R3);
+		return;
+	
+	endif;
+	
+	multipop(R1,R2,R3);
+	
+	//2.Check if there any free space in OFT
+	alias OFTindex R4;
+	OFTindex = 0;
+	while(OFTindex < MAX_OPENFILE_NUM) do
+	
+		if([OPEN_FILE_TABLE + OFTindex*4 + 1 ]==0) then
+			
+			//3.If file is root
+			if(fileName=="root") then
+				breakpoint;
+				[OPEN_FILE_TABLE + OFTindex*4 + 0] = INODE_ROOT;
+			
+			else
+		
+				//4.Else increment count in FST as well
+				
+				[OPEN_FILE_TABLE + OFTindex*4 + 0] = inodeIndex;
+				if([FILE_STATUS_TABLE +inodeIndex*4 + 1]==-1) then
+					[FILE_STATUS_TABLE +inodeIndex*4 + 1] = 1;
+				else
+					[FILE_STATUS_TABLE +inodeIndex*4 + 1] = [FILE_STATUS_TABLE +inodeIndex*4 + 1] + 1;
+				endif;
+			
+			endif;
+			break;
+		endif;
+		
+		OFTindex = OFTindex+1;
+	endwhile;
+	
+	if(OFTindex==MAX_OPENFILE_NUM) then
+	
+		R0 =-2;
+		return;
+	
+	endif;	
+	
+	//5.Set open instance count to 1 and Lseek to 0 in OFT
+	
+	[OPEN_FILE_TABLE + OFTindex*4 + 1] = 1;
+	[OPEN_FILE_TABLE + OFTindex*4 + 2] = 0;
+	 
+	//6.Release inode
+	
+	multipush(R1,R2,R3,R4);
+	
+	R1 =5;
+	R2 =inodeIndex;
+	R3 =[SYSTEM_STATUS_TABLE+1];
+	
+	call RESOURCE_MANAGER;
+	
+	
+	multipop(R1,R2,R3,R4);
+	
+	//Returning OFTindex
+	R0 = OFTindex;
+endif;
+
+//Close File
+if(functionNum==4) then
+
+	alias OFTindex R2;
+	alias inodeIndex R3;
+	
+	inodeIndex = [OPEN_FILE_TABLE + OFTindex*4 + 0];
+	
+	//1. Decrement Open Instance count
+	[OPEN_FILE_TABLE+OFTindex*4 +1] = [OPEN_FILE_TABLE+OFTindex*4 +1] -1;
+	
+	//2.If it becomes 0 , invalidate that entry in OFT and decrement open count in FST 
+	if([OPEN_FILE_TABLE+OFTindex*4 +1]==0) then
+	
+		[OPEN_FILE_TABLE+OFTindex*4 +1]=-1;
+		[FILE_STATUS_TABLE +inodeIndex*4 + 1] = [FILE_STATUS_TABLE +inodeIndex*4 + 1] -1;
+		
+			//3.If FST[openCount]==0 ,then invalidate FST entry too
+			if([FILE_STATUS_TABLE +inodeIndex*4 + 1]==0 ) then
+			
+				[FILE_STATUS_TABLE +inodeIndex*4 + 1] = -1;
+				
+			endif;
+			
+			
+	endif;		
+
+
+endif;
+
+return;

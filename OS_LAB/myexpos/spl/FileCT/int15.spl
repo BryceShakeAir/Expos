@@ -1,0 +1,76 @@
+alias userSP R0;
+userSP = SP;
+alias currentPID R1;
+currentPID = [SYSTEM_STATUS_TABLE+1];
+alias currProcessTable R2;
+currProcessTable = PROCESS_TABLE + currentPID*16;
+
+//Switch stk;
+[currProcessTable + 13] = SP;
+SP = [currProcessTable + 11]*512 -1;
+
+//Setting mode
+[currProcessTable + 9] = 21;
+
+alias returnAddr R3;
+returnAddr = [ PTBR + 2*( (userSP-1)/512 ) ]*512 + (userSP-1)%512;
+
+//1.Check if user is root and pid is shell init
+if( [currProcessTable + 3]==1 && currentPID == 1 ) then
+
+	//2.store the inode table, root file and dfl into disk
+	
+	backup;
+	
+	R2 = currentPID;
+	R3 =  59;
+	R4 = 3;
+	R1 = 1;
+	
+	call DEVICE_MANAGER;
+	
+	restore;
+
+	backup;
+	
+	R2 = currentPID;
+	R3 = 60;
+	R4 = 4;
+	R1 = 1;
+	call DEVICE_MANAGER;
+	
+	restore;
+	
+	//Root file
+	backup;
+	
+	R2 = currentPID;
+	R3 = 62;
+	R4 = 5;
+	R1 = 1;
+	call DEVICE_MANAGER;
+	
+	restore;
+	
+	//dfl
+	backup;
+	
+	R2 = currentPID;
+	R3 = 61;
+	R4 = 2;
+	R1 = 1;
+	
+	call DEVICE_MANAGER;
+	
+	restore;
+	
+	
+	[returnAddr] = 0;	
+	
+else
+
+	[returnAddr] =-1;
+
+endif;
+
+halt;

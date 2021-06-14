@@ -1,0 +1,39 @@
+int main()
+{
+	decl
+		int temp ,i,fileDesc;
+		string fileName,owner,userName;
+	enddecl
+	begin
+		
+		temp = exposcall("Read",-1,userName);
+	
+		fileDesc = exposcall("Open","root");
+		if(fileDesc>=0 ) then
+		
+			i=0;
+			while(i<60) do
+			
+				temp = exposcall("Read",fileDesc,fileName);
+				temp = exposcall("Seek",fileDesc,2);
+				temp = exposcall("Read",fileDesc,owner);
+				
+				if(fileName!="-1" ) then
+				
+					if(userName==owner) then
+					
+						temp = exposcall("Write",-2,fileName);
+						temp = exposcall("Delete",fileName);
+				
+					endif;
+					
+				endif;
+				temp = exposcall("Seek",fileDesc,4);
+				i = i+1;
+			endwhile;
+		
+		endif;	
+		temp = exposcall("Close",fileDesc);
+		return 0;
+	end
+}
